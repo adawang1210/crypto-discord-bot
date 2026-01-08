@@ -71,21 +71,27 @@ class DiscordFormatter:
             source_name = item.get("source", "Unknown")
             
             # Build field value with title and summary
-            field_value = f"**{title_zh}**"
+            field_value = f"**{idx}. {title_zh}**"
             
             if summary:
-                # Limit summary to fit in Discord
+                # Clean up summary - remove price tables and extra whitespace
                 summary_text = summary[:250]
-                field_value += f"\n\n{summary_text}"
+                # Remove lines that look like price data
+                summary_lines = [line.strip() for line in summary_text.split('\n') if line.strip() and not any(char.isdigit() and '$' in line for char in line)]
+                if summary_lines:
+                    summary_text = ' '.join(summary_lines)[:250]
+                
+                if summary_text and len(summary_text) > 10:
+                    field_value += f"\n{summary_text}"
             
-            field_value += f"\n\n   └ 📊 **Impact Score:** {impact_score}/10"
+            field_value += f"\n**Impact Score:** {impact_score}/10"
             
             if source_url:
-                field_value += f" | 🔗 [{source_name}]({source_url})"
+                field_value += f" | [{source_name}]({source_url})"
             
-            # Add field to embed
+            # Add field to embed (use simpler category name without emoji)
             embed.add_field(
-                name=f"{emoji} **{category_name}**",
+                name=f"{idx}. {category_name}",
                 value=field_value,
                 inline=False
             )
