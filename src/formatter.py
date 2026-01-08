@@ -1,215 +1,94 @@
 """
-Formatter module for Crypto Morning Pulse Bot.
-Handles Discord embed formatting and message composition.
+Discord formatter module for Crypto Morning Pulse Bot.
+Implements the new layout with Market Overview, News, and X Trending.
 """
 
-from typing import List, Dict, Optional
 from datetime import datetime
 import discord
-
-from src.config import (
-    EMBED_COLOR,
-    TIMEZONE,
-)
-from src.logger import logger
+from typing import List, Dict
 
 
 class DiscordFormatter:
-    """Formats content into Discord embeds and messages."""
-    
-    # Category display names (Chinese)
-    CATEGORY_NAMES = {
-        "macro_policy": "Macro/Policy",
-        "capital_flow": "Capital Flow",
-        "major_coins": "Major Coins",
-        "altcoins_trending": "Altcoins/Trending",
-        "tech_narratives": "Tech/Narratives",
-        "kol_insights": "KOL Insights",
-    }
+    """Formats crypto data into the new Discord embed layout."""
     
     @staticmethod
-    def create_daily_briefing_embed(
-        items: List[Dict],
-        degraded_mode: bool = False
-    ) -> discord.Embed:
-        """
-        Create a Discord embed for the daily crypto briefing.
-        
-        Args:
-            items: List of selected news/KOL items to include.
-            degraded_mode: Whether to include degradation warning.
-        
-        Returns:
-            discord.Embed: Formatted Discord embed.
-        """
-        # Create embed with title and basic info
+    def format_currency(value: float) -> str:
+        """Format large numbers into $X.XXT or $XX.XX億."""
+        if value >= 1e12:
+            return f"${value/1e12:.2f}T"
+        elif value >= 1e8:
+            return f"${value/1e8:.2f}億"
+        elif value >= 1e4:
+            return f"${value/1e4:.2f}萬"
+        return f"${value:,.2f}"
+
+    @staticmethod
+    def create_daily_briefing_embed(data: Dict) -> discord.Embed:
+        """Create the new structured daily briefing embed."""
         now = datetime.now()
-        date_str = now.strftime("%b %d, %Y")
+        date_str = now.strftime("%b %d, %2026")
         
         embed = discord.Embed(
-            title=f"🌅 Crypto Morning Pulse | {date_str}",
+            title=f"Crypto Morning Pulse | {date_str}",
             description="Here's what's moving markets today",
-            color=EMBED_COLOR,
+            color=0xF7931A,
             timestamp=now
         )
         
-        # Add separator line
-        embed.add_field(
-            name="━━━━━━━━━━━━━━━━━━━━━━━━━",
-            value="",
-            inline=False
+        # 1. Market Overview
+        overview = data.get('market_overview', {})
+        btc = overview.get('btc', {})
+        eth = overview.get('eth', {})
+        xrp = overview.get('xrp', {})
+        
+        market_text = (
+            f"• BTC: ${btc.get('usd', 0):,.0f} ({btc.get('usd_24h_change', 0):+.1f}%)\n"
+            f"• ETH: ${eth.get('usd', 0):,.0f} ({eth.get('usd_24h_change', 0):+.1f}%)\n"
+            f"• XRP: ${xrp.get('usd', 0):.2f} ({xrp.get('usd_24h_change', 0):+.1f}%)\n"
+            f"• 總市值: {DiscordFormatter.format_currency(overview.get('total_market_cap', 0))} ({overview.get('market_cap_change', 0):+.1f}%)\n"
+            f"• 恐懼貪婪指數: {overview.get('fng_value', 'N/A')} ({overview.get('fng_classification', 'N/A')})"
         )
+        embed.add_field(name="**市場概況** (過去24小時)", value=market_text, inline=False)
         
-        # Add items as fields
-        for item in items:
-            category = item.get("category", "macro_policy")
-            category_display = DiscordFormatter.CATEGORY_NAMES.get(category, "Macro/Policy")
-            
-            # Get rewritten summary (improved content)
-            summary = item.get("summary_rewritten", item.get("summary", ""))
-            
-            # Get source link and name
-            source_url = item.get("url", "")
-            source_name = item.get("source_name", item.get("source", "Unknown"))
-            
-            # Build field value: Category + Summary + Source
-            # Format: **{Category}:** {Summary}\n**[{Source}]({URL})**
-            field_value = f"**{category_display}:** {summary}\n**[{source_name}]({source_url})**"
-            
-            # Add field to embed without numbering
-            embed.add_field(
-                name="\u200b", # Zero-width space for name to keep it clean
-                value=field_value,
-                inline=False
-            )
+        # Visual Separator
+        embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━━━━", inline=False)
         
-        # Add separator line before footer
-        embed.add_field(
-            name="━━━━━━━━━━━━━━━━━━━━━━━━━",
-            value="",
-            inline=False
-        )
+        # 2. Market Dynamics (News)
+        news_items = data.get('news_items', [])
+        categories = {
+            "macro_policy": "Macro/Policy",
+            "capital_flow": "Capital Flow",
+            "major_coins": "Major Coins",
+            "altcoins_trending": "Altcoins/Trending",
+            "tech_narratives": "Tech/Narratives"
+        }
         
-        # Add footer with data sources
+        news_text = ""
+        # Group news by category (simplified for now)
+        for item in news_items[:4]:
+            cat_name = categories.get(item.get('category', 'macro_policy'), "Macro/Policy")
+            summary = item.get('summary_rewritten', item.get('title', ''))
+            source = item.get('source', 'Unknown')
+            news_text += f"**{cat_name}**\n• {summary} | {source}\n\n"
+        
+        if news_text:
+            embed.add_field(name="**市場動態**", value=news_text, inline=False)
+            
+        # Visual Separator
+        embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━━━━", inline=False)
+        
+        # 3. X Trending Posts
+        x_posts = data.get('x_posts', [])
+        x_text = ""
+        for post in x_posts[:5]:
+            x_text += f"• **[@{post['username']}]** - {post['text']} | 互動數: {post['likes']} likes\n"
+            
+        if x_text:
+            embed.add_field(name="**社群焦點**\n\nX Trending Posts", value=x_text, inline=False)
+            
+        # Footer
         embed.set_footer(
             text=f"Powered by Manus AI | Data: X, CryptoPanic, CoinGecko\nGenerated at: {now.strftime('%H:%M')} UTC+8"
         )
         
-        # Add image if available (set as embed image for the last item)
-        if items and items[-1].get("image_url"):
-            embed.set_image(url=items[-1].get("image_url"))
-        
         return embed
-    
-    @staticmethod
-    def create_health_check_embed(
-        status: Dict,
-        degraded: bool = False
-    ) -> discord.Embed:
-        """
-        Create a health check status embed.
-        
-        Args:
-            status: Status information dictionary.
-            degraded: Whether system is in degraded mode.
-        
-        Returns:
-            discord.Embed: Formatted health check embed.
-        """
-        now = datetime.now()
-        
-        color = 0xFF6B6B if degraded else 0x51CF66  # Red for degraded, green for healthy
-        
-        embed = discord.Embed(
-            title="🏥 Crypto Morning Pulse - Health Check",
-            description="Daily system status report",
-            color=color,
-            timestamp=now
-        )
-        
-        # Add status fields
-        embed.add_field(
-            name="Status",
-            value="⚠️ Degraded Mode" if degraded else "✅ Healthy",
-            inline=False
-        )
-        
-        embed.add_field(
-            name="Items Processed",
-            value=str(status.get("items_processed", 0)),
-            inline=True
-        )
-        
-        embed.add_field(
-            name="Items Published",
-            value=str(status.get("items_published", 0)),
-            inline=True
-        )
-        
-        if status.get("errors"):
-            embed.add_field(
-                name="Errors",
-                value=status.get("errors"),
-                inline=False
-            )
-        
-        embed.set_footer(
-            text="Generated by Crypto Morning Pulse Bot"
-        )
-        
-        return embed
-    
-    @staticmethod
-    def create_error_notification_embed(
-        error_message: str,
-        error_count: int = 1
-    ) -> discord.Embed:
-        """
-        Create an error notification embed.
-        
-        Args:
-            error_message: Error message to display.
-            error_count: Number of consecutive errors.
-        
-        Returns:
-            discord.Embed: Formatted error embed.
-        """
-        now = datetime.now()
-        
-        embed = discord.Embed(
-            title="🚨 Crypto Morning Pulse - Error Alert",
-            description=f"Error occurred during daily briefing generation",
-            color=0xFF6B6B,  # Red
-            timestamp=now
-        )
-        
-        embed.add_field(
-            name="Error",
-            value=error_message[:1024],
-            inline=False
-        )
-        
-        embed.add_field(
-            name="Consecutive Errors",
-            value=str(error_count),
-            inline=True
-        )
-        
-        embed.set_footer(
-            text="Please check bot logs for more details"
-        )
-        
-        return embed
-    
-    @staticmethod
-    def _format_category_name(category: str) -> str:
-        """
-        Format category name for display.
-        
-        Args:
-            category: Category identifier.
-        
-        Returns:
-            str: Formatted category name.
-        """
-        return DiscordFormatter.CATEGORY_NAMES.get(category, "Macro/Policy")
