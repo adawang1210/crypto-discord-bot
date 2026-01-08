@@ -63,9 +63,16 @@ class CryptoMorningPulseBot(commands.Cog):
                 total_items=4
             )
             
-            # 3. Enhance news (summarize)
+            # 3. Enhance news (summarize and extract images)
             async with ContentEnhancer() as enhancer:
                 enhanced_news = await enhancer.enhance_items(selected_news)
+            
+            # 3.5 Extract images for selected news
+            async with DataFetcher() as fetcher:
+                for item in enhanced_news:
+                    img_url = await fetcher.extract_og_image(item.get('url', ''))
+                    if img_url:
+                        item['image_url'] = img_url
             
             # 4. Prepare final data for formatter
             final_data = {
