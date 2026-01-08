@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  crypto-bot:
+    build: .
+    container_name: crypto-morning-pulse-bot
+    environment:
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - DISCORD_CHANNEL_ID=${DISCORD_CHANNEL_ID}
+      - ADMIN_CHANNEL_ID=${ADMIN_CHANNEL_ID}
+      - BOT_OWNER_ID=${BOT_OWNER_ID}
+      - TIMEZONE=Asia/Taipei
+      - CRYPTOPANIC_API_KEY=${CRYPTOPANIC_API_KEY:-}
+      - COINGECKO_API_KEY=${COINGECKO_API_KEY:-}
+      - NITTER_INSTANCES=${NITTER_INSTANCES:-nitter.net,nitter.poast.org,nitter.privacydev.net}
+      - NITTER_REQUEST_DELAY=2.5
+      - MIN_IMPACT_SCORE=7
+      - MIN_KOL_SCORE=60
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./logs:/app/logs
+      - ./cache:/app/cache
+    restart: unless-stopped
+    networks:
+      - crypto-network
+
+networks:
+  crypto-network:
+    driver: bridge
