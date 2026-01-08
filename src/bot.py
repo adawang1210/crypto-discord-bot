@@ -81,12 +81,23 @@ class CryptoMorningPulseBot(commands.Cog):
                 "x_posts": data.get("x_posts")
             }
             
-            # 5. Create and send embed
-            embed = DiscordFormatter.create_daily_briefing_embed(final_data)
+            # 5. Generate "Today's Focus"
+            from src.summarizer import ContentSummarizer
+            async with ContentSummarizer() as summarizer:
+                todays_focus = await summarizer.generate_todays_focus(
+                    final_data['market_overview'], 
+                    final_data['news_items']
+                )
+                final_data['todays_focus'] = todays_focus
+
+            # 6. Create batches and send multiple messages
+            batches = DiscordFormatter.create_batches(final_data)
             channel = self.bot.get_channel(DISCORD_CHANNEL_ID)
             if channel:
-                await channel.send(embed=embed)
-                logger.info("Daily briefing posted successfully")
+                for batch in batches:
+                    await channel.send(batch)
+                    await asyncio.sleep(1) # Small delay to prevent rate limiting
+                logger.info("Daily briefing posted successfully in batches")
                 return True
             return False
         except Exception as e:

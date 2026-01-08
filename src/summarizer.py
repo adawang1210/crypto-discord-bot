@@ -1,7 +1,7 @@
 """
 Content summarizer module for Crypto Morning Pulse Bot.
 Rewrites extracted content into concise, high-quality summaries in Traditional Chinese.
-Uses local logic and free translation APIs instead of OpenAI.
+Includes logic for generating a 150-word "Today's Focus" summary.
 """
 
 import asyncio
@@ -49,29 +49,49 @@ class ContentSummarizer:
 
     def _format_financials(self, text: str) -> str:
         """Format currency and percentages as requested."""
-        # Format billions/millions
         text = re.sub(r"\$(\d+(?:\.\d+)?)\s*billion", lambda m: f"${float(m.group(1)):.2f}億", text, flags=re.IGNORECASE)
         text = re.sub(r"\$(\d+(?:\.\d+)?)\s*million", lambda m: f"${float(m.group(1)):.2f}萬", text, flags=re.IGNORECASE)
-        # Format percentages
         text = re.sub(r"(\d+(?:\.\d+)?)\s*%", lambda m: f"{float(m.group(1)):.1f}%", text)
         return text
+
+    async def generate_todays_focus(self, market_data: Dict, news_items: List[Dict]) -> str:
+        """Generate a 150-word summary of today's market focus."""
+        # Extract key info
+        btc_change = market_data.get('btc', {}).get('usd_24h_change', 0)
+        fng_val = market_data.get('fng_value', 'N/A')
+        fng_class = market_data.get('fng_classification', 'N/A')
+        
+        # Simple template-based logic for 150 words summary
+        price_trend = "上漲" if btc_change > 0 else "下跌"
+        sentiment = "樂觀" if "Greed" in fng_class else "恐慌" if "Fear" in fng_class else "謹慎"
+        
+        top_news = news_items[0].get('title', '') if news_items else "市場動態平穩"
+        top_news_zh = await self._translate_text(top_news)
+        
+        focus = (
+            f"比特幣今日呈現{price_trend}走勢，目前在${market_data.get('btc', {}).get('usd', 0):,.0f}附近波動，"
+            f"主要受到市場對{top_news_zh[:30]}的關注影響。ETH和XRP也隨之波動，顯示出整體市場的連動性。"
+            f"恐懼貪婪指數目前為{fng_val}，顯示市場情緒處於{fng_class}狀態，投資人表現出{sentiment}態度。"
+            f"重大新聞方面，{top_news_zh}引發了廣泛討論。整體而言，短期市場呈現{sentiment}觀望態勢，"
+            f"建議投資人密切關注後續政策動向與資金流向，保持資產配置的靈活性。"
+        )
+        
+        # Ensure it's around 150 characters (Traditional Chinese characters)
+        if len(focus) > 160:
+            focus = focus[:157] + "。"
+        elif len(focus) < 140:
+            focus += "市場參與者正等待更多宏觀經濟數據公佈，以判斷下一階段的方向。"
+            
+        return focus
 
     async def summarize_item(self, item: Dict, category: str) -> Dict:
         """Summarize and format news item with keywords."""
         try:
             title = item.get("title", "")
             content = item.get("summary", "") or item.get("text", "")
-            
-            # 1. Extract Keyword
             keyword = self._extract_keywords(title + " " + content)
-            
-            # 2. Translate
             title_zh = await self._translate_text(title)
-            
-            # 3. Format Financials
             title_zh = self._format_financials(title_zh)
-            
-            # 4. Final Assembly: **[關鍵詞]** - [摘要]
             item["summary_rewritten"] = f"**{keyword}** - {title_zh}"
             return item
         except Exception as e:
