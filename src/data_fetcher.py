@@ -85,19 +85,7 @@ class NitterRotator:
         """
         if instance in self.instance_status:
             self.instance_status[instance]["healthy"] = True
-            logger.info(f"Marked Nitter instance as healthy: {instance}")
-    
-    def get_status_report(self) -> Dict[str, bool]:
-        """
-        Get status report of all instances.
-        
-        Returns:
-            Dict[str, bool]: Mapping of instances to their health status.
-        """
-        return {
-            instance: status["healthy"]
-            for instance, status in self.instance_status.items()
-        }
+            logger.debug(f"Marked Nitter instance as healthy: {instance}")
 
 
 class DataFetcher:
@@ -200,33 +188,36 @@ class DataFetcher:
                     continue
                 
                 self.nitter_rotator.mark_healthy(instance)
+                
+                soup = BeautifulSoup(content, "html.parser")
+                tweet_elements = soup.find_all("div", class_="tweet")
+                
+                for tweet in tweet_elements[:max_posts]:
+                    try:
+                        text_elem = tweet.find("p", class_="tweet-text")
+                        link_elem = tweet.find("a", class_="tweet-link")
+                        time_elem = tweet.find("span", class_="tweet-date")
+                        
+                        if text_elem and link_elem:
+                            post = {
+                                "username": username,
+                                "text": text_elem.get_text(strip=True),
+                                "url": f"https://{instance}{link_elem.get('href', '')}",
+                                "timestamp": time_elem.get_text(strip=True) if time_elem else None,
+                                "source": "nitter",
+                            }
+                            posts.append(post)
+                    except Exception as e:
+                        logger.debug(f"Error parsing tweet from {username}: {str(e)}")
+                        continue
+                
+                # Successfully fetched and parsed, break the retry loop
                 break
             
-            soup = BeautifulSoup(content, "html.parser")
-            tweet_elements = soup.find_all("div", class_="tweet")
-            
-            for tweet in tweet_elements[:max_posts]:
-                try:
-                    text_elem = tweet.find("p", class_="tweet-text")
-                    link_elem = tweet.find("a", class_="tweet-link")
-                    time_elem = tweet.find("span", class_="tweet-date")
-                    
-                    if text_elem and link_elem:
-                        post = {
-                            "username": username,
-                            "text": text_elem.get_text(strip=True),
-                            "url": f"https://{instance}{link_elem.get('href', '')}",
-                            "timestamp": time_elem.get_text(strip=True) if time_elem else None,
-                            "source": "nitter",
-                        }
-                        posts.append(post)
-                except Exception as e:
-                    logger.debug(f"Error parsing tweet from {username}: {str(e)}")
-                    continue
-        
-        except Exception as e:
-            logger.error(f"Error fetching Nitter posts for {username}: {str(e)}")
-            self.nitter_rotator.mark_failed(instance)
+            except Exception as e:
+                logger.error(f"Error fetching Nitter posts for {username}: {str(e)}")
+                self.nitter_rotator.mark_failed(instance)
+                retry_count += 1
         
         return posts
     
@@ -235,15 +226,21 @@ class DataFetcher:
         Fetch trending news from CryptoPanic API.
         
         Returns:
-            List[Dict]: List of news items.
+            List[Dict]: List of news items with metadata.
         """
         news_items = []
         
         if not CRYPTOPANIC_API_KEY:
-            logger.debug("CryptoPanic API key not configured, skipping")
+            logger.debug("CryptoPanic API key not configured, skipping news fetch")
             return news_items
         
-        url = f"https://cryptopanic.com/api/v1/posts/?auth_token={CRYPTOPANIC_API_KEY}&kind=news"
+        url = "https://cryptopanic.com/api/v1/posts/"
+        params = {
+            "auth_token": CRYPTOPANIC_API_KEY,
+            "kind": "news",
+            "public": "true",
+            "limit": 20,
+        }
         
         try:
             content = await self._fetch_url(url)
@@ -251,125 +248,84 @@ class DataFetcher:
                 import json
                 data = json.loads(content)
                 
-                for item in data.get("results", [])[:10]:
+                for item in data.get("results", []):
                     news_items.append({
                         "title": item.get("title", ""),
                         "url": item.get("url", ""),
-                        "source": item.get("source", {}).get("title", "Unknown"),
+                        "source": item.get("source", {}).get("title", ""),
                         "published_at": item.get("published_at", ""),
                         "kind": item.get("kind", ""),
-                        "source_type": "cryptopanic",
                     })
         except Exception as e:
-            logger.error(f"Error fetching CryptoPanic news: {str(e)}")
+            logger.warning(f"Error fetching CryptoPanic news: {str(e)}")
         
         return news_items
     
-    async def fetch_rss_feed(self, feed_url: str) -> List[Dict]:
+    async def fetch_rss_feeds(self) -> List[Dict]:
         """
-        Fetch items from an RSS feed.
-        
-        Args:
-            feed_url: URL of the RSS feed.
+        Fetch news from RSS feeds.
         
         Returns:
-            List[Dict]: List of feed items.
+            List[Dict]: List of feed items with metadata.
         """
-        items = []
+        feed_items = []
         
-        try:
-            content = await self._fetch_url(feed_url)
-            if content:
-                feed = feedparser.parse(content)
-                
-                for entry in feed.entries[:10]:
-                    items.append({
-                        "title": entry.get("title", ""),
-                        "url": entry.get("link", ""),
-                        "published": entry.get("published", ""),
-                        "summary": entry.get("summary", "")[:200],
-                        "source_type": "rss",
-                    })
-        except Exception as e:
-            logger.error(f"Error fetching RSS feed {feed_url}: {str(e)}")
-        
-        return items
-    
-    async def fetch_all_kol_posts(self) -> List[Dict]:
-        """
-        Fetch posts from all KOLs in the watch list.
-        
-        Returns:
-            List[Dict]: Combined list of KOL posts with tier information.
-        """
-        all_posts = []
-        
-        # Combine all KOL tiers
-        kol_list = [
-            (username, tier, 50) for username, tier in KOL_TIER_1.items()
-        ] + [
-            (username, tier, 30) for username, tier in KOL_TIER_2.items()
-        ] + [
-            (username, tier, 30) for username, tier in KOL_TIER_3.items()
+        feeds = [
+            "https://feeds.coindesk.com/news",
+            "https://cointelegraph.com/feed",
+            "https://decrypt.co/feed",
         ]
         
-        # Fetch posts concurrently
-        tasks = [
-            self.fetch_nitter_kol_posts(username)
-            for username, _, _ in kol_list
-        ]
+        for feed_url in feeds:
+            try:
+                content = await self._fetch_url(feed_url)
+                if content:
+                    feed = feedparser.parse(content)
+                    
+                    for entry in feed.entries[:5]:
+                        feed_items.append({
+                            "title": entry.get("title", ""),
+                            "url": entry.get("link", ""),
+                            "published_at": entry.get("published", ""),
+                            "source": feed.feed.get("title", feed_url),
+                        })
+            except Exception as e:
+                logger.debug(f"Error fetching RSS feed {feed_url}: {str(e)}")
         
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        for (username, tier, base_score), posts in zip(kol_list, results):
-            if isinstance(posts, list):
-                for post in posts:
-                    post["kol_tier"] = tier
-                    post["base_score"] = base_score
-                    all_posts.append(post)
-        
-        return all_posts
+        return feed_items
     
-    async def fetch_all_data(self) -> Dict[str, List]:
+    async def fetch_all_data(self) -> Dict[str, List[Dict]]:
         """
         Fetch data from all sources.
         
         Returns:
-            Dict[str, List]: Dictionary containing data from all sources.
+            Dict[str, List[Dict]]: Dictionary with data from all sources.
         """
-        logger.info("Starting data fetch from all sources")
+        kol_posts = {}
         
-        try:
-            kol_posts, cryptopanic_news = await asyncio.gather(
-                self.fetch_all_kol_posts(),
-                self.fetch_cryptopanic_news(),
-                return_exceptions=True
-            )
-            
-            # Handle exceptions
-            if isinstance(kol_posts, Exception):
-                logger.error(f"Error fetching KOL posts: {kol_posts}")
-                kol_posts = []
-            
-            if isinstance(cryptopanic_news, Exception):
-                logger.error(f"Error fetching CryptoPanic news: {cryptopanic_news}")
-                cryptopanic_news = []
-            
-            logger.info(
-                f"Data fetch complete: {len(kol_posts)} KOL posts, "
-                f"{len(cryptopanic_news)} news items"
-            )
-            
-            return {
-                "kol_posts": kol_posts,
-                "news": cryptopanic_news,
-                "nitter_status": self.nitter_rotator.get_status_report(),
-            }
+        # Fetch KOL posts from all tiers
+        all_kols = {**KOL_TIER_1, **KOL_TIER_2, **KOL_TIER_3}
         
-        except Exception as e:
-            logger.error(f"Error in fetch_all_data: {str(e)}")
-            return {
-                "kol_posts": [],
-                "news": [],
-                "nitter_status": self.nitter_rotator.get_status_report(),
-            }
+        tasks = [
+            self.fetch_nitter_kol_posts(username, max_posts=5)
+            for username in all_kols.keys()
+        ]
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for username, result in zip(all_kols.keys(), results):
+            if isinstance(result, Exception):
+                logger.warning(f"Error fetching posts for {username}: {str(result)}")
+                kol_posts[username] = []
+            else:
+                kol_posts[username] = result
+        
+        # Fetch news
+        news = await self.fetch_cryptopanic_news()
+        rss_items = await self.fetch_rss_feeds()
+        
+        return {
+            "kol_posts": kol_posts,
+            "news": news,
+            "rss_items": rss_items,
+        }
