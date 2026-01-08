@@ -74,7 +74,7 @@ class ContentSummarizer:
         return text
 
     async def generate_todays_focus(self, market_data: Dict, news_items: List[Dict]) -> str:
-        """Generate a 150-word summary of today's market focus in Traditional Chinese."""
+        """Generate a detailed summary of today's market focus in Traditional Chinese."""
         btc_change = market_data.get('btc', {}).get('usd_24h_change', 0)
         fng_val = market_data.get('fng_value', 'N/A')
         fng_class = market_data.get('fng_classification', 'N/A')
@@ -87,17 +87,17 @@ class ContentSummarizer:
         
         focus = (
             f"比特幣今日呈現{price_trend}走勢，目前在${market_data.get('btc', {}).get('usd', 0):,.0f}附近波動，"
-            f"主要受到市場對{top_news_zh[:40]}的關注影響。ETH和XRP也隨之波動，顯示出整體市場的連動性。"
+            f"主要受到市場對{top_news_zh}的關注影響。ETH和XRP也隨之波動，顯示出整體市場的連動性。"
             f"恐懼貪婪指數目前為{fng_val}，顯示市場情緒處於{fng_class}狀態，投資人表現出{sentiment}態度。"
             f"重大新聞方面，{top_news_zh}引發了廣泛討論。整體而言，短期市場呈現{sentiment}觀望態勢，"
             f"建議投資人密切關注後續政策動向與資金流向，保持資產配置的靈活性，以應對可能的市場波動。"
         )
         
-        # Ensure it's around 150 words (characters in Chinese)
-        if len(focus) < 140:
+        # Add more context if needed without hard truncation
+        if len(focus) < 150:
             focus += " 此外，宏觀經濟數據的公佈也將成為判斷下一階段方向的重要指標。"
             
-        return focus[:200] # Cap at 200 chars for safety
+        return focus
 
     async def summarize_item(self, item: Dict, category: str) -> Dict:
         """Summarize and format news item with deeper Traditional Chinese content."""
@@ -118,9 +118,9 @@ class ContentSummarizer:
             
             # Combine for a richer description (1-2 lines)
             # Format: **[關鍵詞]** - [標題]。[深度內容摘要]
-            full_summary = f"**{keyword}** - {title_zh}。{content_zh[:150]}"
+            full_summary = f"**{keyword}** - {title_zh}。{content_zh}"
             
-            # Clean up and limit
+            # Clean up and limit to a reasonable length for Discord fields but don't cut mid-sentence
             item["summary_rewritten"] = full_summary.replace("\n", " ").strip()
             return item
         except Exception as e:

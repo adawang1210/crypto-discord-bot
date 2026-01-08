@@ -1,6 +1,7 @@
 """
 Scoring and content filtering module for Crypto Morning Pulse Bot.
 Implements impact scoring, deduplication, and content quality assessment.
+Optimized to retain critical price action and market trend news.
 """
 
 import re
@@ -74,15 +75,26 @@ class ContentScorer:
         summary = (item.get("summary", "") or "").lower()
         full_text = title + " " + summary
         
+        # 1. Check for soft news exclusion
         for pattern in self.EXCLUDE_KEYWORDS:
             if re.search(pattern, full_text):
                 logger.info(f"🚫 Excluding (Soft News): {title[:50]}... (Reason: {pattern})")
                 return False
         
+        # 2. Critical market keywords (Price action, etc.) - These should always be relevant
+        critical_keywords = [
+            r"bitcoin", r"btc", r"ethereum", r"eth", r"xrp", r"ripple", r"solana", r"sol",
+            r"price", r"slips", r"rally", r"crash", r"surge", r"dip", r"bull", r"bear", 
+            r"market", r"liquidation", r"ath", r"all-time high", r"below \$\d+", r"above \$\d+"
+        ]
+        if any(re.search(p, full_text) for p in critical_keywords):
+            return True
+
+        # 3. General crypto relevance
         crypto_keywords = [
-            r"btc", r"eth", r"sol", r"xrp", r"ripple", r"zcash", r"zec", r"ada", r"dot", r"avax",
+            r"zcash", r"zec", r"ada", r"dot", r"avax",
             r"crypto", r"blockchain", r"token", r"etf", r"ipo", r"sec", r"fed", r"regulation",
-            r"market", r"price", r"trading", r"defi", r"nft", r"dao", r"layer", r"wallet",
+            r"trading", r"defi", r"nft", r"dao", r"layer", r"wallet",
             r"exchange", r"binance", r"coinbase", r"funding", r"investment", r"hack", r"exploit",
             r"web3", r"digital asset", r"stablecoin", r"mining", r"staking", r"developer", r"devs",
             r"split", r"launch", r"announcement", r"partnership", r"cz", r"vitalik", r"buterin",
@@ -104,7 +116,8 @@ class ContentScorer:
                 continue
                 
             score = self._calculate_news_quality_score(item)
-            if score >= 2 and not self.is_duplicate(item.get("title", "")):
+            # Lowered threshold slightly to ensure more items pass
+            if score >= 1.5 and not self.is_duplicate(item.get("title", "")):
                 item["impact_score"] = score
                 scored_items.append(item)
         
@@ -121,7 +134,7 @@ class ContentScorer:
         
         if re.search(r"\$\d{2,}[mb]|billion|million", text):
             score += 3.0
-        if re.search(r"surge|plummet|crash|rally|breakout|ath|all-time high", text):
+        if re.search(r"surge|plummet|crash|rally|breakout|ath|all-time high|slips|below|above", text):
             score += 2.0
         for keyword, multiplier in CONTENT_KEYWORD_MULTIPLIERS.items():
             if re.search(rf"\b{keyword}\b", text):
