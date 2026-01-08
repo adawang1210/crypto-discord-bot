@@ -58,19 +58,21 @@ class ContentEnhancer:
             async with self.session.get(
                 self.translate_url,
                 params=params,
-                timeout=aiohttp.ClientTimeout(total=10)
+                timeout=aiohttp.ClientTimeout(total=5)
             ) as response:
                 if response.status == 200:
                     data = await response.json()
                     
                     if data.get("responseStatus") == 200:
                         translated = data.get("responseData", {}).get("translatedText", "")
-                        if translated:
-                            logger.debug(f"Translated: {text[:50]}... -> {translated[:50]}...")
+                        if translated and len(translated) > 2:
+                            logger.info(f"✅ Translated: {text[:40]}... -> {translated[:40]}...")
                             return translated
         
+        except asyncio.TimeoutError:
+            logger.warning(f"Translation timeout for: {text[:40]}...")
         except Exception as e:
-            logger.debug(f"Translation error: {str(e)}")
+            logger.warning(f"Translation error: {str(e)}")
         
         return text
     
@@ -131,8 +133,11 @@ class ContentEnhancer:
             if not summary:
                 summary = article_text[:max_length]
             
-            logger.debug(f"Extracted summary: {summary[:50]}...")
-            return summary
+            if summary and len(summary) > 10:
+                logger.info(f"✅ Extracted summary: {summary[:50]}...")
+                return summary
+            
+            return ""
         
         except Exception as e:
             logger.debug(f"Summary extraction error: {str(e)}")
@@ -155,8 +160,9 @@ class ContentEnhancer:
             og_image = soup.find("meta", property="og:image")
             if og_image and og_image.get("content"):
                 image_url = og_image.get("content")
-                logger.debug(f"Found OG image: {image_url[:50]}...")
-                return image_url
+                if image_url.startswith("http"):
+                    logger.info(f"✅ Found OG image: {image_url[:50]}...")
+                    return image_url
             
             # Try to find first image in article
             article = soup.find("article") or soup.find("main") or soup.find("body")
@@ -164,12 +170,8 @@ class ContentEnhancer:
                 img = article.find("img")
                 if img and img.get("src"):
                     image_url = img.get("src")
-                    # Convert relative URLs to absolute if needed
-                    if image_url.startswith("/"):
-                        # Can't convert without base URL, skip
-                        pass
-                    elif image_url.startswith("http"):
-                        logger.debug(f"Found article image: {image_url[:50]}...")
+                    if image_url.startswith("http"):
+                        logger.info(f"✅ Found article image: {image_url[:50]}...")
                         return image_url
             
             # Try any image on page
@@ -177,7 +179,7 @@ class ContentEnhancer:
             if img and img.get("src"):
                 image_url = img.get("src")
                 if image_url.startswith("http"):
-                    logger.debug(f"Found page image: {image_url[:50]}...")
+                    logger.info(f"✅ Found page image: {image_url[:50]}...")
                     return image_url
         
         except Exception as e:
@@ -198,16 +200,17 @@ class ContentEnhancer:
         try:
             # Translate title
             title = item.get("title", "")
-            title_zh = await self.translate_to_chinese(title)
-            item["title_zh"] = title_zh
+            if title:
+                title_zh = await self.translate_to_chinese(title)
+                item["title_zh"] = title_zh
             
             # Extract summary and image from URL if available
             url = item.get("url", "")
-            if url:
+            if url and url.startswith("http"):
                 try:
                     async with self.session.get(
                         url,
-                        timeout=aiohttp.ClientTimeout(total=10),
+                        timeout=aiohttp.ClientTimeout(total=8),
                         ssl=False
                     ) as response:
                         if response.status == 200:
@@ -222,6 +225,8 @@ class ContentEnhancer:
                             image_url = await self.extract_image(html_content)
                             if image_url:
                                 item["image_url"] = image_url
+                except asyncio.TimeoutError:
+                    logger.warning(f"Timeout fetching {url[:50]}...")
                 except Exception as e:
                     logger.debug(f"Error fetching URL {url}: {str(e)}")
             
@@ -233,7 +238,7 @@ class ContentEnhancer:
     
     async def enhance_items(self, items: List[Dict]) -> List[Dict]:
         """
-        Enhance multiple items in parallel.
+        Enhance multiple items in parallel with timeout.
         
         Args:
             items: List of items to enhance.
@@ -241,15 +246,29 @@ class ContentEnhancer:
         Returns:
             List[Dict]: List of enhanced items.
         """
-        tasks = [self.enhance_item(item) for item in items]
-        enhanced_items = await asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            # Create tasks with timeout
+            tasks = [
+                asyncio.wait_for(self.enhance_item(item), timeout=15)
+                for item in items
+            ]
+            
+            # Run all tasks concurrently
+            enhanced_items = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Filter and process results
+            result = []
+            for idx, item in enumerate(enhanced_items):
+                if isinstance(item, Exception):
+                    logger.warning(f"Error enhancing item {idx}: {str(item)}")
+                    # Return original item if enhancement failed
+                    result.append(items[idx])
+                else:
+                    result.append(item)
+            
+            logger.info(f"✅ Enhanced {len(result)} items successfully")
+            return result
         
-        # Filter out exceptions
-        result = []
-        for item in enhanced_items:
-            if isinstance(item, Exception):
-                logger.error(f"Error enhancing item: {str(item)}")
-            else:
-                result.append(item)
-        
-        return result
+        except Exception as e:
+            logger.error(f"Error in enhance_items: {str(e)}")
+            return items

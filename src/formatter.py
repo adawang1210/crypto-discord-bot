@@ -49,18 +49,9 @@ class DiscordFormatter:
         
         # Add items as fields
         for idx, item in enumerate(items, 1):
-            # Determine category based on item type
-            item_type = item.get("type", "news")
-            if item_type == "trending":
-                category = "trending"
-            else:
-                category = item.get("category", "macro_policy")
-            
-            emoji = CATEGORY_EMOJIS.get(category, "📰")
-            category_name = DiscordFormatter._format_category_name(category)
-            
-            # Prepare summary text
-            summary = item.get("title", item.get("text", ""))[:280]
+            # Use Chinese title if available, otherwise use English
+            title_zh = item.get("title_zh", item.get("title", ""))
+            summary = item.get("summary", "")
             
             # Get impact score (use item score or calculate from base)
             impact_score = int(item.get("score", item.get("score_base", 5)))
@@ -69,18 +60,18 @@ class DiscordFormatter:
             source_url = item.get("url", "")
             source_name = item.get("source", "Unknown")
             
-            # Format field value with impact score and source
+            # Build field value with title and summary
+            field_value = f"**{title_zh}**"
+            
+            if summary:
+                # Limit summary to fit in Discord
+                summary_text = summary[:250]
+                field_value += f"\n\n{summary_text}"
+            
+            field_value += f"\n\n   └ 📊 **Impact Score:** {impact_score}/10"
+            
             if source_url:
-                field_value = (
-                    f"{summary}\n"
-                    f"   └ 📊 **Impact Score:** {impact_score}/10 | "
-                    f"🔗 [{source_name}]({source_url})"
-                )
-            else:
-                field_value = (
-                    f"{summary}\n"
-                    f"   └ 📊 **Impact Score:** {impact_score}/10"
-                )
+                field_value += f" | 🔗 [{source_name}]({source_url})"
             
             # Add field to embed
             embed.add_field(
@@ -88,7 +79,11 @@ class DiscordFormatter:
                 value=field_value,
                 inline=False
             )
-        
+            
+            # Add image if available (set as embed image for the last item)
+            if idx == len(items) and item.get("image_url"):
+                embed.set_image(url=item.get("image_url"))
+
         # Add degradation warning if needed
         if degraded_mode:
             embed.add_field(
