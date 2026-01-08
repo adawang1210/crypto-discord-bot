@@ -94,27 +94,50 @@ class ContentEnhancer:
         try:
             soup = BeautifulSoup(html_content, "html.parser")
             
-            # Remove script and style elements
-            for script in soup(["script", "style"]):
-                script.decompose()
+            # Remove unwanted elements
+            for element in soup(["script", "style", "nav", "footer", "header", "aside"]):
+                element.decompose()
+            
+            # Remove common non-article elements
+            for selector in [".sidebar", ".advertisement", ".ads", ".comments", ".related-posts", ".social-share"]:
+                for element in soup.select(selector):
+                    element.decompose()
             
             # Try to find article content
             article_text = ""
             
             # Try common article containers
-            for selector in ["article", ".article-content", ".post-content", ".entry-content", "main"]:
+            for selector in ["article", ".article-content", ".post-content", ".entry-content", ".content", "main", ".main-content"]:
                 element = soup.select_one(selector)
                 if element:
-                    article_text = element.get_text()
-                    break
+                    # Get paragraphs from article
+                    paragraphs = element.find_all("p")
+                    if paragraphs:
+                        article_text = " ".join([p.get_text().strip() for p in paragraphs[:5]])
+                        break
+                    else:
+                        article_text = element.get_text()
+                        break
             
             # Fallback to body if no article found
             if not article_text:
                 body = soup.find("body")
                 if body:
-                    article_text = body.get_text()
+                    paragraphs = body.find_all("p")
+                    if paragraphs:
+                        article_text = " ".join([p.get_text().strip() for p in paragraphs[:5]])
+                    else:
+                        article_text = body.get_text()
             
-            # Clean up text
+            # Clean up text - remove extra whitespace
+            article_text = re.sub(r"\s+", " ", article_text).strip()
+            
+            # Remove common non-article patterns (prices, tables, etc.)
+            article_text = re.sub(r"\$[0-9,]+\.?[0-9]*%?", "", article_text)  # Remove prices
+            article_text = re.sub(r"[0-9]+\.[0-9]+%", "", article_text)  # Remove percentages
+            article_text = re.sub(r"\b[A-Z]{2,}\b\s+\$", "", article_text)  # Remove ticker prices
+            
+            # Clean up again
             article_text = re.sub(r"\s+", " ", article_text).strip()
             
             # Extract first sentences to reach max_length
@@ -122,7 +145,11 @@ class ContentEnhancer:
             summary = ""
             
             for sentence in sentences:
-                if len(summary) + len(sentence) <= max_length:
+                sentence = sentence.strip()
+                if not sentence or len(sentence) < 5:
+                    continue
+                
+                if len(summary) + len(sentence) + 1 <= max_length:
                     summary += sentence + " "
                 else:
                     break
@@ -131,9 +158,10 @@ class ContentEnhancer:
             
             # Ensure we have at least some content
             if not summary:
-                summary = article_text[:max_length]
+                # Last resort: just take first max_length characters
+                summary = article_text[:max_length].strip()
             
-            if summary and len(summary) > 10:
+            if summary and len(summary) > 20:
                 logger.info(f"✅ Extracted summary: {summary[:50]}...")
                 return summary
             
