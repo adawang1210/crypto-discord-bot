@@ -90,7 +90,9 @@ class ContentScorer:
             r"market", r"price", r"trading", r"defi", r"nft", r"dao", r"layer", r"wallet",
             r"exchange", r"binance", r"coinbase", r"funding", r"investment", r"hack", r"exploit",
             r"web3", r"digital asset", r"stablecoin", r"mining", r"staking", r"developer", r"devs",
-            r"split", r"launch", r"announcement", r"partnership"
+            r"split", r"launch", r"announcement", r"partnership", r"cz", r"vitalik", r"buterin",
+            r"saylor", r"musk", r"grayscale", r"microstrategy", r"blackrock", r"fidelity",
+            r"rtfkt", r"collectibles", r"metaverse", r"airdrop", r"whitelist"
         ]
         
         if any(re.search(p, full_text) for p in crypto_keywords):
