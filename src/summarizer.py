@@ -2,6 +2,7 @@
 Content summarizer module for Crypto Morning Pulse Bot.
 Rewrites extracted content into concise, high-quality summaries in Traditional Chinese.
 Includes logic for generating a 150-word "Today's Focus" summary.
+Optimized for deeper content and Traditional Chinese consistency.
 """
 
 import asyncio
@@ -37,13 +38,17 @@ class ContentSummarizer:
             self.session = aiohttp.ClientSession()
             
         try:
-            text_to_translate = text[:500]
-            params = {"q": text_to_translate, "langpair": "en|zh-TW"}
+            # Clean text for better translation
+            text = text.replace("\n", " ").strip()
+            params = {"q": text[:500], "langpair": "en|zh-TW"}
             async with self.session.get(self.translate_url, params=params, timeout=10) as response:
                 if response.status == 200:
                     data = await response.json()
                     if data.get("responseStatus") == 200:
-                        return data.get("responseData", {}).get("translatedText", "")
+                        translated = data.get("responseData", {}).get("translatedText", "")
+                        # Basic cleanup of translation artifacts
+                        translated = translated.replace("＆", "&").replace("＃", "#")
+                        return translated
         except Exception: pass
         return text
 
@@ -52,13 +57,14 @@ class ContentSummarizer:
         entities = [
             "Bitcoin", "BTC", "Ethereum", "ETH", "XRP", "Ripple", "Solana", "SOL",
             "SEC", "ETF", "Binance", "Coinbase", "MicroStrategy", "Vitalik", "CZ",
-            "Fed", "Regulation", "Hack", "Exploit", "Zcash", "ZEC", "Nike", "RTFKT"
+            "Fed", "Regulation", "Hack", "Exploit", "Zcash", "ZEC", "Nike", "RTFKT",
+            "Tether", "USDT", "Cardano", "ADA", "Polkadot", "DOT", "Avalanche", "AVAX"
         ]
         for entity in entities:
             if re.search(rf"\b{entity}\b", text, re.IGNORECASE):
                 return entity
         match = re.search(r"\b[A-Z][a-z]+\b", text)
-        return match.group(0) if match else "加密貨幣"
+        return match.group(0) if match else "市場動態"
 
     def _format_financials(self, text: str) -> str:
         """Format currency and percentages as requested."""
@@ -68,7 +74,7 @@ class ContentSummarizer:
         return text
 
     async def generate_todays_focus(self, market_data: Dict, news_items: List[Dict]) -> str:
-        """Generate a 150-word summary of today's market focus."""
+        """Generate a 150-word summary of today's market focus in Traditional Chinese."""
         btc_change = market_data.get('btc', {}).get('usd_24h_change', 0)
         fng_val = market_data.get('fng_value', 'N/A')
         fng_class = market_data.get('fng_classification', 'N/A')
@@ -81,28 +87,41 @@ class ContentSummarizer:
         
         focus = (
             f"比特幣今日呈現{price_trend}走勢，目前在${market_data.get('btc', {}).get('usd', 0):,.0f}附近波動，"
-            f"主要受到市場對{top_news_zh[:30]}的關注影響。ETH和XRP也隨之波動，顯示出整體市場的連動性。"
+            f"主要受到市場對{top_news_zh[:40]}的關注影響。ETH和XRP也隨之波動，顯示出整體市場的連動性。"
             f"恐懼貪婪指數目前為{fng_val}，顯示市場情緒處於{fng_class}狀態，投資人表現出{sentiment}態度。"
             f"重大新聞方面，{top_news_zh}引發了廣泛討論。整體而言，短期市場呈現{sentiment}觀望態勢，"
-            f"建議投資人密切關注後續政策動向與資金流向，保持資產配置的靈活性。"
+            f"建議投資人密切關注後續政策動向與資金流向，保持資產配置的靈活性，以應對可能的市場波動。"
         )
         
-        if len(focus) > 160:
-            focus = focus[:157] + "。"
-        elif len(focus) < 140:
-            focus += "市場參與者正等待更多宏觀經濟數據公佈，以判斷下一階段的方向。"
+        # Ensure it's around 150 words (characters in Chinese)
+        if len(focus) < 140:
+            focus += " 此外，宏觀經濟數據的公佈也將成為判斷下一階段方向的重要指標。"
             
-        return focus
+        return focus[:200] # Cap at 200 chars for safety
 
     async def summarize_item(self, item: Dict, category: str) -> Dict:
-        """Summarize and format news item with keywords."""
+        """Summarize and format news item with deeper Traditional Chinese content."""
         try:
             title = item.get("title", "")
             content = item.get("summary", "") or item.get("text", "")
+            
+            # Extract keyword (keep English)
             keyword = self._extract_keywords(title + " " + content)
+            
+            # Translate title and content for a deeper summary
             title_zh = await self._translate_text(title)
+            content_zh = await self._translate_text(content[:300]) # Get a bit more context
+            
+            # Format financials
             title_zh = self._format_financials(title_zh)
-            item["summary_rewritten"] = f"**{keyword}** - {title_zh}"
+            content_zh = self._format_financials(content_zh)
+            
+            # Combine for a richer description (1-2 lines)
+            # Format: **[關鍵詞]** - [標題]。[深度內容摘要]
+            full_summary = f"**{keyword}** - {title_zh}。{content_zh[:150]}"
+            
+            # Clean up and limit
+            item["summary_rewritten"] = full_summary.replace("\n", " ").strip()
             return item
         except Exception as e:
             logger.error(f"Error in summarization: {str(e)}")

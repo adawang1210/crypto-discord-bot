@@ -1,10 +1,13 @@
 """
 Discord formatter module for Crypto Morning Pulse Bot.
 Optimized for clean links, continuous numbering, and dynamic batching to respect Discord's 2000 char limit.
+Removed image display logic as per user request.
 """
 
 from datetime import datetime
 from typing import List, Dict
+import pytz
+from src.config import TIMEZONE
 
 
 class DiscordFormatter:
@@ -27,7 +30,7 @@ class DiscordFormatter:
     @staticmethod
     def create_batches(data: Dict) -> List[str]:
         """Create message batches with dynamic character counting to respect Discord's 2000 limit."""
-        now = datetime.now()
+        now = datetime.now(pytz.timezone(TIMEZONE))
         date_str = now.strftime("%b %d, %Y")
         batches = []
         current_batch = ""
@@ -89,11 +92,10 @@ class DiscordFormatter:
                 summary = item.get('summary_rewritten', item.get('title', ''))
                 source = item.get('source', 'Unknown')
                 url = item.get('url', '')
-                img_url = item.get('image_url', '')
                 
+                # Format: 1. **[關鍵詞]** - [摘要] | 來源 | [連結](URL)
+                # Removed image [📷] logic
                 line = f"{news_counter}. {summary} | {source} | [連結]({url})"
-                if img_url:
-                    line += f" | [📷]({img_url})"
                 add_to_batch(line + "\n")
                 news_counter += 1
             add_to_batch("\n")

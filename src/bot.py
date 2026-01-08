@@ -1,6 +1,7 @@
 """
 Discord bot module for Crypto Morning Pulse.
 Handles commands, events, and the daily briefing task.
+Optimized for speed by removing image extraction.
 """
 
 import asyncio
@@ -53,7 +54,6 @@ class CryptoBot(commands.Bot):
             # 2. Score and select news
             logger.info(">>> [STEP 3] Scoring and selecting news...")
             scorer = ContentScorer()
-            # Call with positional arguments: (items, total_items)
             selected_news = scorer.score_news_items(
                 data.get("news_items", []),
                 8
@@ -73,14 +73,7 @@ class CryptoBot(commands.Bot):
                 )
             logger.info(">>> [STEP 4 DONE] Summarization complete")
             
-            # 3.5 Extract images for selected news
-            logger.info(">>> [STEP 5] Extracting images...")
-            async with DataFetcher() as fetcher:
-                for item in enhanced_news:
-                    img_url = await fetcher.extract_og_image(item.get('url', ''))
-                    if img_url:
-                        item['image_url'] = img_url
-            logger.info(">>> [STEP 5 DONE] Image extraction complete")
+            # STEP 5 (Image Extraction) removed as per user request to speed up and simplify
             
             # 4. Prepare final data
             final_data = {
