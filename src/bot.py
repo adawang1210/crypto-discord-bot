@@ -26,6 +26,7 @@ class CryptoBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True
+        intents.guilds = True
         super().__init__(command_prefix="!", intents=intents)
         self.tz = pytz.timezone(TIMEZONE)
 
@@ -40,7 +41,7 @@ class CryptoBot(commands.Bot):
     async def post_daily_briefing(self):
         """Fetch, score, summarize and post the daily briefing."""
         try:
-            logger.info("Starting daily briefing post")
+            logger.info("Starting daily briefing post process...")
             
             # 1. Fetch all data
             async with DataFetcher() as fetcher:
@@ -50,7 +51,7 @@ class CryptoBot(commands.Bot):
             scorer = ContentScorer()
             selected_news = scorer.score_news_items(
                 news_items=data.get("news_items", []),
-                total_items=8 # Fetch more to ensure variety
+                total_items=8
             )
             
             if not selected_news:
@@ -95,18 +96,29 @@ class CryptoBot(commands.Bot):
                     await asyncio.sleep(1)
                 logger.info("Daily briefing posted successfully")
                 return True
-            return False
+            else:
+                logger.error(f"Could not find channel with ID {DISCORD_CHANNEL_ID}")
+                return False
         except Exception as e:
-            logger.error(f"Error posting daily briefing: {str(e)}")
+            logger.error(f"Error posting daily briefing: {str(e)}", exc_info=True)
             return False
 
-    @commands.command(name="crypto-pulse-now")
-    async def trigger_briefing(self, ctx):
-        # Removed "Generating..." message
-        success = await self.post_daily_briefing()
-        # Removed "Posted!" message
+    async def on_ready(self):
+        logger.info(f"Logged in as {self.user.name} (ID: {self.user.id})")
+        logger.info("------ Bot is ready ------")
+
+    async def on_command_error(self, ctx, error):
+        logger.error(f"Command error: {str(error)}")
+
+@commands.command(name="crypto-pulse-now")
+async def trigger_briefing(ctx):
+    logger.info(f"Manual trigger requested by {ctx.author}")
+    # We use a background task to avoid blocking the command response
+    bot = ctx.bot
+    asyncio.create_task(bot.post_daily_briefing())
 
 async def run_bot():
     bot = CryptoBot()
+    bot.add_command(trigger_briefing)
     async with bot:
         await bot.start(DISCORD_BOT_TOKEN)
