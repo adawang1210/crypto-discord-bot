@@ -117,17 +117,28 @@ class ContentScorer:
 
     def _calculate_news_quality_score(self, item: Dict) -> int:
         """Calculate quality score for a news item."""
-        score = 2 # Base score
+        score = 2.0 # Base score
         text = (item.get("title", "") + (item.get("summary", "") or "")).lower()
         
-        if re.search(r"\$\d{2,}[mb]|billion|million", text): score += 3
-        if re.search(r"surge|plummet|crash|rally|breakout|ath|all-time high", text): score += 2
+        # 1. Financial significance
+        if re.search(r"\$\d{2,}[mb]|billion|million", text):
+            score += 3.0
+        
+        # 2. Market movement keywords
+        if re.search(r"surge|plummet|crash|rally|breakout|ath|all-time high", text):
+            score += 2.0
             
+        # 3. Keyword multipliers from config
+        for keyword, multiplier in CONTENT_KEYWORD_MULTIPLIERS.items():
+            if re.search(rf"\b{keyword}\b", text):
+                score *= multiplier
+            
+        # 4. Source reliability
         source = item.get("source", "").lower()
         if any(s in source for s in ["coindesk", "cointelegraph", "the block", "decrypt", "bloomberg", "reuters"]):
-            score += 2
+            score += 2.0
             
-        return min(score, 10)
+        return int(min(score, 10))
 
     def _categorize_news(self, item: Dict) -> str:
         """Categorize a news item."""

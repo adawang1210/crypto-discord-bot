@@ -24,12 +24,57 @@ POSTING_TIME: time = time(9, 0)  # 09:00 AM
 # ==================== API Keys ====================
 CRYPTOPANIC_API_KEY: str = os.getenv("CRYPTOPANIC_API_KEY", "")
 COINGECKO_API_KEY: str = os.getenv("COINGECKO_API_KEY", "")
-# Added X API support (if available)
 X_API_BEARER_TOKEN: str = os.getenv("X_API_BEARER_TOKEN", "")
 
 # ==================== Scoring Thresholds ====================
 MIN_IMPACT_SCORE: int = int(os.getenv("MIN_IMPACT_SCORE", "5"))
 MIN_KOL_SCORE: int = int(os.getenv("MIN_KOL_SCORE", "60"))
+
+# ==================== Content Scoring Multipliers ====================
+# 內容關鍵字權重乘數（用於評分系統）
+CONTENT_KEYWORD_MULTIPLIERS = {
+    # 高優先級關鍵字（重大事件）
+    "sec": 1.5,
+    "etf": 1.5,
+    "regulation": 1.3,
+    "hack": 1.4,
+    "exploit": 1.4,
+    
+    # 機構動向
+    "institutional": 1.3,
+    "microstrategy": 1.2,
+    "grayscale": 1.2,
+    "blackrock": 1.2,
+    
+    # 主流幣種
+    "bitcoin": 1.2,
+    "ethereum": 1.2,
+    "btc": 1.2,
+    "eth": 1.2,
+    
+    # 技術突破
+    "upgrade": 1.2,
+    "mainnet": 1.3,
+    "partnership": 1.1,
+    
+    # 市場情緒
+    "bull": 1.1,
+    "bear": 1.1,
+    "crash": 1.3,
+    "rally": 1.2,
+    
+    # 負面關鍵字（降低權重）
+    "meme": 0.8,
+    "shitcoin": 0.6,
+    "scam": 0.7,
+}
+
+# ==================== Recency Bonus ====================
+RECENCY_BONUS: Dict[str, int] = {
+    "2_hours": 15,
+    "6_hours": 10,
+    "12_hours": 5,
+}
 
 # ==================== Performance Configuration ====================
 MAX_CONCURRENT_REQUESTS: int = int(os.getenv("MAX_CONCURRENT_REQUESTS", "10"))
