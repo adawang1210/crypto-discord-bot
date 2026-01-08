@@ -24,7 +24,6 @@ from src.logger import logger
 
 class CryptoBot(commands.Bot):
     def __init__(self):
-        # Enable all intents to ensure message content and other events are captured
         intents = discord.Intents.all()
         super().__init__(command_prefix="!", intents=intents)
         self.tz = pytz.timezone(TIMEZONE)
@@ -40,13 +39,16 @@ class CryptoBot(commands.Bot):
     async def post_daily_briefing(self):
         """Fetch, score, summarize and post the daily briefing."""
         try:
-            logger.info("Starting daily briefing post process...")
+            logger.info(">>> [STEP 1] Starting daily briefing post process...")
             
             # 1. Fetch all data
+            logger.info(">>> [STEP 2] Fetching data from APIs and RSS...")
             async with DataFetcher() as fetcher:
                 data = await fetcher.fetch_all_data()
+            logger.info(f">>> [STEP 2 DONE] Fetched {len(data.get('news_items', []))} news items")
             
             # 2. Score and select news
+            logger.info(">>> [STEP 3] Scoring and selecting news...")
             scorer = ContentScorer()
             selected_news = scorer.score_news_items(
                 news_items=data.get("news_items", []),
@@ -54,22 +56,27 @@ class CryptoBot(commands.Bot):
             )
             
             if not selected_news:
-                logger.warning("Insufficient items for briefing: 0")
+                logger.warning(">>> [ABORT] Insufficient items for briefing: 0")
                 return False
+            logger.info(f">>> [STEP 3 DONE] Selected {len(selected_news)} news items")
 
             # 3. Enhance news (summarize)
+            logger.info(">>> [STEP 4] Summarizing news items...")
             async with ContentSummarizer() as summarizer:
                 enhanced_news = await summarizer.summarize_items(
                     selected_news, 
                     [item.get('category', 'macro_policy') for item in selected_news]
                 )
+            logger.info(">>> [STEP 4 DONE] Summarization complete")
             
             # 3.5 Extract images for selected news
+            logger.info(">>> [STEP 5] Extracting images...")
             async with DataFetcher() as fetcher:
                 for item in enhanced_news:
                     img_url = await fetcher.extract_og_image(item.get('url', ''))
                     if img_url:
                         item['image_url'] = img_url
+            logger.info(">>> [STEP 5 DONE] Image extraction complete")
             
             # 4. Prepare final data
             final_data = {
@@ -79,27 +86,31 @@ class CryptoBot(commands.Bot):
             }
             
             # 5. Generate "Today's Focus"
+            logger.info(">>> [STEP 6] Generating Today's Focus...")
             async with ContentSummarizer() as summarizer:
                 todays_focus = await summarizer.generate_todays_focus(
                     final_data['market_overview'], 
                     final_data['news_items']
                 )
                 final_data['todays_focus'] = todays_focus
+            logger.info(">>> [STEP 6 DONE] Today's Focus generated")
 
             # 6. Create batches and send
+            logger.info(">>> [STEP 7] Formatting and sending to Discord...")
             batches = DiscordFormatter.create_batches(final_data)
             channel = self.get_channel(DISCORD_CHANNEL_ID)
             if channel:
-                for batch in batches:
+                for i, batch in enumerate(batches, 1):
+                    logger.info(f">>> Sending batch {i}/{len(batches)}...")
                     await channel.send(batch)
                     await asyncio.sleep(1)
-                logger.info("Daily briefing posted successfully")
+                logger.info(">>> [SUCCESS] Daily briefing posted successfully")
                 return True
             else:
-                logger.error(f"Could not find channel with ID {DISCORD_CHANNEL_ID}")
+                logger.error(f">>> [ERROR] Could not find channel with ID {DISCORD_CHANNEL_ID}")
                 return False
         except Exception as e:
-            logger.error(f"Error posting daily briefing: {str(e)}", exc_info=True)
+            logger.error(f">>> [FATAL ERROR] {str(e)}", exc_info=True)
             return False
 
     async def on_ready(self):
@@ -107,26 +118,27 @@ class CryptoBot(commands.Bot):
         logger.info("------ Bot is ready and listening for commands ------")
 
     async def on_message(self, message):
-        # Ignore messages from the bot itself
         if message.author == self.user:
             return
-
-        # Log received messages for debugging
         if message.content.startswith("!"):
             logger.info(f"Received command: {message.content} from {message.author}")
-
-        # Process commands
         await self.process_commands(message)
 
     @commands.command(name="crypto-pulse-now")
     async def trigger_briefing(self, ctx):
         logger.info(f"Manual trigger requested by {ctx.author}")
-        # Add a reaction to let the user know the command was received
         try:
-            await ctx.message.add_reaction("👀")
-        except: pass
-        
-        asyncio.create_task(self.post_daily_briefing())
+            await ctx.message.add_reaction("⏳")
+            # Use await directly to catch errors in the current context
+            success = await self.post_daily_briefing()
+            if success:
+                await ctx.message.add_reaction("✅")
+            else:
+                await ctx.message.add_reaction("❌")
+        except Exception as e:
+            logger.error(f"Error in trigger_briefing: {str(e)}")
+            try: await ctx.message.add_reaction("⚠️")
+            except: pass
 
 async def run_bot():
     bot = CryptoBot()
