@@ -36,11 +36,11 @@ class ContentScorer:
     }
     
     # Keywords to exclude (soft news, interviews, irrelevant topics)
+    # Made more specific to avoid over-filtering
     EXCLUDE_KEYWORDS = [
-        r"interview", r"profile", r"personal story", r"growing up", r"childhood",
-        r"lifestyle", r"opinion piece", r"career", r"entrepreneurship",
-        r"how to", r"guide for", r"beginner", r"podcast", r"video",
-        r"exclusive interview", r"meet the", r"story of"
+        r"exclusive interview", r"personal story", r"growing up", r"childhood",
+        r"lifestyle", r"career", r"how to", r"guide for", r"beginner",
+        r"meet the", r"story of"
     ]
     
     def __init__(self):
@@ -72,100 +72,85 @@ class ContentScorer:
     def is_relevant(self, item: Dict) -> bool:
         """
         Check if the item is relevant to crypto market movements.
-        Excludes soft news, interviews, and personal stories.
         """
         title = item.get("title", "").lower()
         summary = (item.get("summary", "") or "").lower()
         full_text = title + " " + summary
         
-        # Check for exclude keywords
+        # 1. Check for exclude keywords (stricter matching)
         for pattern in self.EXCLUDE_KEYWORDS:
             if re.search(pattern, full_text):
-                logger.debug(f"Excluding item due to keyword '{pattern}': {title}")
+                logger.info(f"🚫 Excluding (Soft News): {title[:50]}... (Reason: {pattern})")
                 return False
         
-        # Must contain at least one crypto-related keyword to be relevant
+        # 2. Broad crypto keywords to ensure it's about the industry
         crypto_keywords = [
             r"btc", r"eth", r"sol", r"crypto", r"blockchain", r"token", r"etf",
             r"sec", r"fed", r"regulation", r"market", r"price", r"trading",
             r"defi", r"nft", r"dao", r"layer", r"wallet", r"exchange", r"binance",
-            r"coinbase", r"funding", r"investment", r"hack", r"exploit"
+            r"coinbase", r"funding", r"investment", r"hack", r"exploit", r"web3",
+            r"digital asset", r"stablecoin", r"mining", r"staking"
         ]
         
-        if not any(re.search(p, full_text) for p in crypto_keywords):
-            logger.debug(f"Excluding item due to lack of crypto keywords: {title}")
-            return False
+        if any(re.search(p, full_text) for p in crypto_keywords):
+            return True
             
-        return True
+        logger.info(f"🚫 Excluding (Irrelevant): {title[:50]}...")
+        return False
 
     def score_news_items(self, items: List[Dict]) -> List[Dict]:
         """Score and filter news items."""
         scored_items = []
         for item in items:
-            # First check relevance
             if not self.is_relevant(item):
                 continue
                 
             score = self._calculate_news_quality_score(item)
-            if score >= MIN_IMPACT_SCORE and not self.is_duplicate(item.get("title", "")):
+            # Lowered threshold slightly to ensure we have enough content
+            if score >= (MIN_IMPACT_SCORE - 1) and not self.is_duplicate(item.get("title", "")):
                 item["impact_score"] = score
                 scored_items.append(item)
         
         scored_items.sort(key=lambda x: x.get("impact_score", 0), reverse=True)
+        logger.info(f"✅ Filtered and scored {len(scored_items)} relevant news items")
         return scored_items
 
     def _calculate_news_quality_score(self, item: Dict) -> int:
         """Calculate quality score for a news item."""
-        score = 0
+        score = 2 # Base score
         text = (item.get("title", "") + (item.get("summary", "") or "")).lower()
         
-        # Financial significance
-        if re.search(r"\$\d{2,}[mb]|billion|million", text):
-            score += 3
-        
-        # Market movement keywords
-        if re.search(r"surge|plummet|crash|rally|breakout|ath|all-time high", text):
-            score += 2
+        if re.search(r"\$\d{2,}[mb]|billion|million", text): score += 3
+        if re.search(r"surge|plummet|crash|rally|breakout|ath|all-time high", text): score += 2
             
-        # Official/Major sources
         source = item.get("source", "").lower()
         if any(s in source for s in ["coindesk", "cointelegraph", "the block", "decrypt", "bloomberg", "reuters"]):
             score += 2
             
-        return min(score + 2, 10)
+        return min(score, 10)
 
     def _categorize_news(self, item: Dict) -> str:
-        """Categorize a news item with stricter rules."""
+        """Categorize a news item."""
         text = (item.get("title", "") + (item.get("summary", "") or "")).lower()
         
-        # Stricter Capital Flow: must involve actual money movement or funding
         if re.search(r"inflow|outflow|whale|transfer|drain|hack|exploit|funding|raised|investment|venture|capital|seed round", text):
             return "capital_flow"
-        
-        # Macro/Policy: regulation, law, central banks
         if re.search(r"sec|regulation|law|policy|etf|fed|central bank|government|court|lawsuit|legal", text):
             return "macro_policy"
-            
-        # Major Coins: BTC, ETH, SOL
         if re.search(r"\bbitcoin\b|\bbtc\b|\bethereum\b|\beth\b|\bsolana\b|\bsol\b", text):
             return "major_coins"
-            
-        # Altcoins/Trending: specific tokens or trending topics
         if re.search(r"altcoin|token|memecoin|trending|surge|pump|listing", text):
             return "altcoins_trending"
-            
-        # Tech/Narratives: infrastructure, protocols
         if re.search(r"layer|l2|defi|rwa|ai|zk|protocol|infrastructure|mainnet|testnet|upgrade", text):
             return "tech_narratives"
             
         return "macro_policy"
 
     def select_top_items_with_diversity(self, kol_posts: List[Dict], news_items: List[Dict], total_items: int = 5) -> List[Dict]:
-        """Select top items ensuring category diversity and relevance."""
+        """Select top items ensuring category diversity."""
         selected = []
         category_count = {cat: 0 for cat in self.VALID_CATEGORIES.keys()}
         
-        # Step 1: Add 1 KOL Insights if available
         if kol_posts:
             kol_item = kol_posts[0]
             kol_item["category"] = "kol_insights"
@@ -175,17 +160,13 @@ class ContentScorer:
             selected.append(kol_item)
             category_count["kol_insights"] = 1
         
-        # Step 2: Categorize news items
         categorized_news = {cat: [] for cat in self.VALID_CATEGORIES.keys() if cat != "kol_insights"}
         for item in news_items:
             category = self._categorize_news(item)
             if category in categorized_news:
                 categorized_news[category].append(item)
         
-        # Step 3: Select items ensuring diversity
         news_categories = [cat for cat in self.VALID_CATEGORIES.keys() if cat != "kol_insights"]
-        
-        # Pass 1: 1 from each category
         for category in news_categories:
             if len(selected) >= total_items: break
             if category_count[category] < 1 and categorized_news[category]:
@@ -195,7 +176,6 @@ class ContentScorer:
                 selected.append(item)
                 category_count[category] = 1
         
-        # Pass 2: Fill remaining
         all_remaining = []
         for cat, items in categorized_news.items():
             for item in items:
