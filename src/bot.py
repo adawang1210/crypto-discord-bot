@@ -107,18 +107,12 @@ class CryptoBot(commands.Bot):
         logger.info(f"Logged in as {self.user.name} (ID: {self.user.id})")
         logger.info("------ Bot is ready ------")
 
-    async def on_command_error(self, ctx, error):
-        logger.error(f"Command error: {str(error)}")
-
-@commands.command(name="crypto-pulse-now")
-async def trigger_briefing(ctx):
-    logger.info(f"Manual trigger requested by {ctx.author}")
-    # We use a background task to avoid blocking the command response
-    bot = ctx.bot
-    asyncio.create_task(bot.post_daily_briefing())
+    @commands.command(name="crypto-pulse-now")
+    async def trigger_briefing(self, ctx):
+        logger.info(f"Manual trigger requested by {ctx.author}")
+        asyncio.create_task(self.post_daily_briefing())
 
 async def run_bot():
     bot = CryptoBot()
-    bot.add_command(trigger_briefing)
     async with bot:
         await bot.start(DISCORD_BOT_TOKEN)
