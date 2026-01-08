@@ -117,28 +117,17 @@ class CryptoBot(commands.Bot):
         logger.info(f"Logged in as {self.user.name} (ID: {self.user.id})")
         logger.info("------ Bot is ready and listening for commands ------")
 
-    async def on_message(self, message):
-        if message.author == self.user:
-            return
-        if message.content.startswith("!"):
-            logger.info(f"Received command: {message.content} from {message.author}")
-        await self.process_commands(message)
-
     @commands.command(name="crypto-pulse-now")
     async def trigger_briefing(self, ctx):
         logger.info(f"Manual trigger requested by {ctx.author}")
-        try:
-            await ctx.message.add_reaction("⏳")
-            # Use await directly to catch errors in the current context
-            success = await self.post_daily_briefing()
-            if success:
-                await ctx.message.add_reaction("✅")
-            else:
-                await ctx.message.add_reaction("❌")
-        except Exception as e:
-            logger.error(f"Error in trigger_briefing: {str(e)}")
-            try: await ctx.message.add_reaction("⚠️")
-            except: pass
+        # Immediate feedback to test if bot can send messages
+        await ctx.send("⏳ 正在生成今日簡報，請稍候...")
+        
+        success = await self.post_daily_briefing()
+        if success:
+            await ctx.send("✅ 簡報已成功發布！")
+        else:
+            await ctx.send("❌ 簡報發布失敗，請檢查日誌。")
 
 async def run_bot():
     bot = CryptoBot()
