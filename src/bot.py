@@ -25,6 +25,7 @@ from src.logger import logger
 from src.data_fetcher import DataFetcher
 from src.scorer import ContentScorer
 from src.formatter import DiscordFormatter, MarkdownFormatter
+from src.enhancer import ContentEnhancer
 
 
 class CryptoMorningPulseBot(commands.Cog):
@@ -154,6 +155,10 @@ class CryptoMorningPulseBot(commands.Cog):
             
             # Select top items
             selected_items = unique_items[:min(5, total_items)]
+            
+            # Enhance items with translation, summary, and images
+            async with ContentEnhancer() as enhancer:
+                selected_items = await enhancer.enhance_items(selected_items)
             
             # Add items to cache
             for item in selected_items:
