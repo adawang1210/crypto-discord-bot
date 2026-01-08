@@ -178,23 +178,29 @@ class DataFetcher:
             List[Dict]: List of posts with metadata.
         """
         posts = []
-        instance = self.nitter_rotator.get_next_instance()
+        max_retries = 3
+        retry_count = 0
         
-        if not instance:
-            logger.error("No healthy Nitter instances available")
-            return posts
-        
-        url = f"https://{instance}/{username}"
-        
-        try:
-            await asyncio.sleep(NITTER_REQUEST_DELAY)
-            content = await self._fetch_url(url)
+        while retry_count < max_retries:
+            instance = self.nitter_rotator.get_next_instance()
             
-            if not content:
-                self.nitter_rotator.mark_failed(instance)
-                return posts
+            if not instance:
+                logger.error("No healthy Nitter instances available")
+                break
             
-            self.nitter_rotator.mark_healthy(instance)
+            url = f"https://{instance}/{username}"
+            
+            try:
+                await asyncio.sleep(NITTER_REQUEST_DELAY)
+                content = await self._fetch_url(url)
+                
+                if not content:
+                    self.nitter_rotator.mark_failed(instance)
+                    retry_count += 1
+                    continue
+                
+                self.nitter_rotator.mark_healthy(instance)
+                break
             
             soup = BeautifulSoup(content, "html.parser")
             tweet_elements = soup.find_all("div", class_="tweet")

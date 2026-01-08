@@ -28,9 +28,9 @@ COINGECKO_API_KEY: str = os.getenv("COINGECKO_API_KEY", "")
 # ==================== Nitter Configuration ====================
 NITTER_INSTANCES: List[str] = os.getenv(
     "NITTER_INSTANCES",
-    "nitter.net,nitter.poast.org,nitter.privacydev.net,nitter.privacytools.io"
+    "nitter.net,nitter.poast.org,nitter.privacydev.net,nitter.privacytools.io,nitter.moomoo.me,nitter.1d4.us"
 ).split(",")
-NITTER_REQUEST_DELAY: float = float(os.getenv("NITTER_REQUEST_DELAY", "2.5"))
+NITTER_REQUEST_DELAY: float = float(os.getenv("NITTER_REQUEST_DELAY", "3.5"))
 
 # ==================== Scoring Thresholds ====================
 MIN_IMPACT_SCORE: int = int(os.getenv("MIN_IMPACT_SCORE", "7"))
