@@ -25,6 +25,16 @@ from src.logger import logger
 class ContentScorer:
     """Scores and filters content based on impact and quality criteria."""
     
+    # Valid categories
+    VALID_CATEGORIES = {
+        "macro_policy": "Macro/Policy",
+        "capital_flow": "Capital Flow",
+        "major_coins": "Major Coins",
+        "altcoins_trending": "Altcoins/Trending",
+        "tech_narratives": "Tech/Narratives",
+        "kol_insights": "KOL Insights",
+    }
+    
     def __init__(self):
         """Initialize scorer with cache."""
         self.cache_file = os.path.join(CACHE_DIR, "content_cache.json")
@@ -236,43 +246,6 @@ class ContentScorer:
         logger.info(f"Scored {len(scored_items)} news items (threshold: {MIN_IMPACT_SCORE})")
         return scored_items
     
-    def select_top_items(
-        self,
-        kol_posts: List[Dict],
-        news_items: List[Dict],
-        total_items: int = 5,
-        max_kol: int = 2
-    ) -> List[Dict]:
-        """
-        Select top items ensuring diversity of sources and categories.
-        
-        Args:
-            kol_posts: Scored KOL posts.
-            news_items: Scored news items.
-            total_items: Total items to select.
-            max_kol: Maximum KOL posts to include.
-        
-        Returns:
-            List[Dict]: Selected top items with source information.
-        """
-        selected = []
-        
-        # Add KOL posts (up to max_kol)
-        for post in kol_posts[:max_kol]:
-            post["category"] = "kol_insights"
-            post["source_name"] = post.get("username", "Unknown")
-            selected.append(post)
-        
-        # Add news items to reach total_items
-        remaining_slots = total_items - len(selected)
-        for item in news_items[:remaining_slots]:
-            item["category"] = self._categorize_news(item)
-            item["source_name"] = item.get("source", "Unknown")
-            selected.append(item)
-        
-        logger.info(f"Selected {len(selected)} items for daily briefing")
-        return selected
-    
     def _categorize_news(self, item: Dict) -> str:
         """
         Categorize a news item into one of the predefined categories.
@@ -286,18 +259,89 @@ class ContentScorer:
         text = (item.get("title", "") + item.get("summary", "")).lower()
         
         # Simple keyword-based categorization
-        if re.search(r"sec|regulation|law|policy", text):
+        if re.search(r"sec|regulation|law|policy|etf", text):
             return "macro_policy"
-        elif re.search(r"etf|inflow|outflow|whale|transfer", text):
+        elif re.search(r"inflow|outflow|whale|transfer|drain", text):
             return "capital_flow"
-        elif re.search(r"bitcoin|btc|ethereum|eth", text):
+        elif re.search(r"\bbitcoin\b|\bbtc\b|\bethereum\b|\beth\b|\bsolana\b|\bsol\b", text):
             return "major_coins"
-        elif re.search(r"altcoin|token|memecoin|trending", text):
+        elif re.search(r"altcoin|token|memecoin|trending|surge|pump", text):
             return "altcoins_trending"
-        elif re.search(r"layer|l2|defi|rwa|ai", text):
+        elif re.search(r"layer|l2|defi|rwa|ai|zk|protocol", text):
             return "tech_narratives"
         else:
             return "macro_policy"  # Default category
+    
+    def select_top_items_with_diversity(
+        self,
+        kol_posts: List[Dict],
+        news_items: List[Dict],
+        total_items: int = 5
+    ) -> List[Dict]:
+        """
+        Select top items ensuring category diversity.
+        Prioritize: 1 KOL Insights + 4 diverse news categories.
+        
+        Args:
+            kol_posts: Scored KOL posts.
+            news_items: Scored news items.
+            total_items: Total items to select (default 5).
+        
+        Returns:
+            List[Dict]: Selected items with category diversity.
+        """
+        selected = []
+        category_count = {}
+        
+        # Step 1: Add 1 KOL Insights if available
+        if kol_posts:
+            kol_item = kol_posts[0]
+            kol_item["category"] = "kol_insights"
+            kol_item["source_name"] = kol_item.get("username", "Unknown")
+            selected.append(kol_item)
+            category_count["kol_insights"] = 1
+        
+        # Step 2: Categorize and sort news items
+        categorized_news = {}
+        for item in news_items:
+            category = self._categorize_news(item)
+            if category not in categorized_news:
+                categorized_news[category] = []
+            categorized_news[category].append(item)
+        
+        # Step 3: Select items ensuring category diversity
+        remaining_slots = total_items - len(selected)
+        
+        # First pass: take 1 item from each category
+        for category in sorted(categorized_news.keys()):
+            if len(selected) >= total_items:
+                break
+            
+            if category_count.get(category, 0) < 1 and categorized_news[category]:
+                item = categorized_news[category][0]
+                item["category"] = category
+                item["source_name"] = item.get("source", "Unknown")
+                selected.append(item)
+                category_count[category] = 1
+        
+        # Second pass: fill remaining slots with highest scoring items
+        for category in sorted(categorized_news.keys()):
+            if len(selected) >= total_items:
+                break
+            
+            # Allow max 2 items per category
+            if category_count.get(category, 0) < 2:
+                for item in categorized_news[category][1:]:
+                    if len(selected) >= total_items:
+                        break
+                    if item not in selected:
+                        item["category"] = category
+                        item["source_name"] = item.get("source", "Unknown")
+                        selected.append(item)
+                        category_count[category] = category_count.get(category, 0) + 1
+        
+        logger.info(f"✅ Selected {len(selected)} items with category diversity: {category_count}")
+        return selected[:total_items]
     
     def add_to_cache(self, item: Dict) -> None:
         """

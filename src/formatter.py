@@ -9,10 +9,6 @@ import discord
 
 from src.config import (
     EMBED_COLOR,
-    EMBED_TITLE_FORMAT,
-    EMBED_DESCRIPTION,
-    EMBED_FOOTER_TEXT,
-    CATEGORY_EMOJIS,
     TIMEZONE,
 )
 from src.logger import logger
@@ -20,6 +16,16 @@ from src.logger import logger
 
 class DiscordFormatter:
     """Formats content into Discord embeds and messages."""
+    
+    # Category display names (Chinese)
+    CATEGORY_NAMES = {
+        "macro_policy": "Macro/Policy",
+        "capital_flow": "Capital Flow",
+        "major_coins": "Major Coins",
+        "altcoins_trending": "Altcoins/Trending",
+        "tech_narratives": "Tech/Narratives",
+        "kol_insights": "KOL Insights",
+    }
     
     @staticmethod
     def create_daily_briefing_embed(
@@ -41,81 +47,159 @@ class DiscordFormatter:
         date_str = now.strftime("%b %d, %Y")
         
         embed = discord.Embed(
-            title=EMBED_TITLE_FORMAT.format(date=date_str),
-            description=EMBED_DESCRIPTION,
+            title=f"🌅 Crypto Morning Pulse | {date_str}",
+            description="Here's what's moving markets today",
             color=EMBED_COLOR,
             timestamp=now
         )
         
+        # Add separator line
+        embed.add_field(
+            name="━━━━━━━━━━━━━━━━━━━━━━━━━",
+            value="",
+            inline=False
+        )
+        
         # Add items as fields
         for idx, item in enumerate(items, 1):
-            # Determine category based on item type
-            item_type = item.get("type", "news")
-            if item_type == "trending":
-                category = "trending"
-            else:
-                category = item.get("category", "macro_policy")
+            category = item.get("category", "macro_policy")
+            category_display = DiscordFormatter.CATEGORY_NAMES.get(category, "News")
             
-            emoji = CATEGORY_EMOJIS.get(category, "📰")
-            category_name = DiscordFormatter._format_category_name(category)
-            
-            # Use Chinese title if available, otherwise use English
-            title_zh = item.get("title_zh", item.get("title", ""))
-            summary = item.get("summary", "")
-            
-            # Get impact score (use item score or calculate from base)
-            impact_score = int(item.get("score", item.get("score_base", 5)))
+            # Get rewritten summary (improved content)
+            summary = item.get("summary_rewritten", item.get("summary", ""))
             
             # Get source link and name
             source_url = item.get("url", "")
-            source_name = item.get("source", "Unknown")
+            source_name = item.get("source_name", item.get("source", "Unknown"))
             
-            # Build field value with title and summary
-            field_value = f"**{title_zh}**"
-            
-            if summary:
-                # Clean up summary - remove price tables and extra whitespace
-                summary_text = summary[:250]
-                # Remove lines that look like price data
-                summary_lines = [line.strip() for line in summary_text.split('\n') if line.strip() and not any(char.isdigit() and '$' in line for char in line)]
-                if summary_lines:
-                    summary_text = ' '.join(summary_lines)[:250]
-                
-                if summary_text and len(summary_text) > 10:
-                    field_value += f"\n\n{summary_text}"
+            # Build field value: Category + Summary + Source
+            field_value = f"**{category_display}:** {summary}"
             
             # Add source link if available
             if source_url:
-                field_value += f"\n\n🔗 [{source_name}]({source_url})"
+                field_value += f"\n**[{source_name}]({source_url})**"
             
             # Add field to embed with numbering
             embed.add_field(
-                name=f"{idx}. {category_name}",
+                name=f"{idx}.",
                 value=field_value,
                 inline=False
             )
-            
-            # Add image if available (set as embed image for the last item)
-            if idx == len(items) and item.get("image_url"):
-                embed.set_image(url=item.get("image_url"))
-
-        # Add degradation warning if needed
-        if degraded_mode:
+        
+        # Add separator line before footer
+        embed.add_field(
+            name="━━━━━━━━━━━━━━━━━━━━━━━━━",
+            value="",
+            inline=False
+        )
+        
+        # Add footer with data sources
+        embed.set_footer(
+            text="Powered by Manus AI | Data: X, CryptoPanic, CoinGecko"
+        )
+        
+        # Add image if available (set as embed image for the last item)
+        if items and items[-1].get("image_url"):
+            embed.set_image(url=items[-1].get("image_url"))
+        
+        return embed
+    
+    @staticmethod
+    def create_health_check_embed(
+        status: Dict,
+        degraded: bool = False
+    ) -> discord.Embed:
+        """
+        Create a health check status embed.
+        
+        Args:
+            status: Status information dictionary.
+            degraded: Whether system is in degraded mode.
+        
+        Returns:
+            discord.Embed: Formatted health check embed.
+        """
+        now = datetime.now()
+        
+        color = 0xFF6B6B if degraded else 0x51CF66  # Red for degraded, green for healthy
+        
+        embed = discord.Embed(
+            title="🏥 Crypto Morning Pulse - Health Check",
+            description="Daily system status report",
+            color=color,
+            timestamp=now
+        )
+        
+        # Add status fields
+        embed.add_field(
+            name="Status",
+            value="⚠️ Degraded Mode" if degraded else "✅ Healthy",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="Items Processed",
+            value=str(status.get("items_processed", 0)),
+            inline=True
+        )
+        
+        embed.add_field(
+            name="Items Published",
+            value=str(status.get("items_published", 0)),
+            inline=True
+        )
+        
+        if status.get("errors"):
             embed.add_field(
-                name="⚠️ **Degraded Mode**",
-                value="Some data sources temporarily unavailable. "
-                      "Showing available items only.",
+                name="Errors",
+                value=status.get("errors"),
                 inline=False
             )
         
-        # Set footer with timestamp and data sources
-        footer_text = EMBED_FOOTER_TEXT
-        if degraded_mode:
-            footer_text += " | ⚠️ Partial data"
+        embed.set_footer(
+            text="Generated by Crypto Morning Pulse Bot"
+        )
+        
+        return embed
+    
+    @staticmethod
+    def create_error_notification_embed(
+        error_message: str,
+        error_count: int = 1
+    ) -> discord.Embed:
+        """
+        Create an error notification embed.
+        
+        Args:
+            error_message: Error message to display.
+            error_count: Number of consecutive errors.
+        
+        Returns:
+            discord.Embed: Formatted error embed.
+        """
+        now = datetime.now()
+        
+        embed = discord.Embed(
+            title="🚨 Crypto Morning Pulse - Error Alert",
+            description=f"Error occurred during daily briefing generation",
+            color=0xFF6B6B,  # Red
+            timestamp=now
+        )
+        
+        embed.add_field(
+            name="Error",
+            value=error_message[:1024],
+            inline=False
+        )
+        
+        embed.add_field(
+            name="Consecutive Errors",
+            value=str(error_count),
+            inline=True
+        )
         
         embed.set_footer(
-            text=footer_text,
-            icon_url="https://cdn-icons-png.flaticon.com/512/1/1383.png"
+            text="Please check bot logs for more details"
         )
         
         return embed
@@ -126,191 +210,9 @@ class DiscordFormatter:
         Format category name for display.
         
         Args:
-            category: Internal category name.
+            category: Category identifier.
         
         Returns:
             str: Formatted category name.
         """
-        category_names = {
-            "macro_policy": "Macro/Policy",
-            "capital_flow": "Capital Flow",
-            "major_coins": "Major Coins (BTC/ETH)",
-            "altcoins_trending": "Altcoins/Trending",
-            "tech_narratives": "Tech/Narratives",
-            "kol_insights": "KOL Insights",
-        }
-        return category_names.get(category, "News")
-    
-    @staticmethod
-    def create_health_check_embed(
-        posted_successfully: bool,
-        sources_queried: int,
-        sources_responded: int,
-        nitter_status: Dict[str, bool],
-        execution_time: float,
-        warnings: Optional[List[str]] = None
-    ) -> discord.Embed:
-        """
-        Create a health check status embed.
-        
-        Args:
-            posted_successfully: Whether the post was successful.
-            sources_queried: Number of sources queried.
-            sources_responded: Number of sources that responded.
-            nitter_status: Status of Nitter instances.
-            execution_time: Execution time in seconds.
-            warnings: Optional list of warning messages.
-        
-        Returns:
-            discord.Embed: Health check status embed.
-        """
-        status_emoji = "✅" if posted_successfully else "❌"
-        status_color = 0x00FF00 if posted_successfully else 0xFF0000
-        
-        embed = discord.Embed(
-            title=f"{status_emoji} Health Check Report",
-            color=status_color,
-            timestamp=datetime.now()
-        )
-        
-        # Add status information
-        embed.add_field(
-            name="Post Status",
-            value="✅ Published successfully" if posted_successfully else "❌ Failed to publish",
-            inline=False
-        )
-        
-        embed.add_field(
-            name="Data Sources",
-            value=f"Queried: {sources_queried} | Responded: {sources_responded}",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="Execution Time",
-            value=f"{execution_time:.2f}s",
-            inline=True
-        )
-        
-        # Add Nitter instance status
-        healthy_instances = sum(1 for status in nitter_status.values() if status)
-        total_instances = len(nitter_status)
-        
-        embed.add_field(
-            name="Nitter Instances",
-            value=f"{healthy_instances}/{total_instances} healthy",
-            inline=True
-        )
-        
-        # Add warnings if any
-        if warnings:
-            warnings_text = "\n".join(f"• {w}" for w in warnings)
-            embed.add_field(
-                name="⚠️ Warnings",
-                value=warnings_text,
-                inline=False
-            )
-        
-        embed.set_footer(
-            text="Powered by Manus AI"
-        )
-        
-        return embed
-    
-    @staticmethod
-    def create_error_embed(
-        error_message: str,
-        error_type: str = "Error"
-    ) -> discord.Embed:
-        """
-        Create an error notification embed.
-        
-        Args:
-            error_message: Error message to display.
-            error_type: Type of error.
-        
-        Returns:
-            discord.Embed: Error notification embed.
-        """
-        embed = discord.Embed(
-            title=f"❌ {error_type}",
-            description=error_message,
-            color=0xFF0000,
-            timestamp=datetime.now()
-        )
-        
-        embed.set_footer(
-            text="Powered by Manus AI"
-        )
-        
-        return embed
-
-
-class MarkdownFormatter:
-    """Formats content as Markdown for logs and documentation."""
-    
-    @staticmethod
-    def format_briefing_markdown(items: List[Dict]) -> str:
-        """
-        Format briefing items as Markdown.
-        
-        Args:
-            items: List of items to format.
-        
-        Returns:
-            str: Markdown formatted briefing.
-        """
-        now = datetime.now()
-        date_str = now.strftime("%b %d, %Y")
-        
-        markdown = f"# 🌅 Crypto Morning Pulse | {date_str}\n\n"
-        markdown += "━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        for idx, item in enumerate(items, 1):
-            category = item.get("category", "macro_policy")
-            emoji = CATEGORY_EMOJIS.get(category, "📰")
-            category_name = DiscordFormatter._format_category_name(category)
-            
-            # Get summary
-            if "text" in item:
-                summary = item.get("text", "")[:280]
-            else:
-                summary = item.get("title", "")[:280]
-            
-            impact_score = item.get("impact_score", 0)
-            source_url = item.get("url", "")
-            source_name = item.get("source_name", "Unknown")
-            
-            markdown += f"{emoji} **{category_name}:** {summary}\n"
-            
-            if source_url:
-                markdown += f"   └ 📊 **Impact Score:** {impact_score}/10 | 🔗 [{source_name}]({source_url})\n\n"
-            else:
-                markdown += f"   └ 📊 **Impact Score:** {impact_score}/10\n\n"
-        
-        markdown += "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        markdown += f"Powered by Manus AI | Data: X, CryptoPanic, CoinGecko\n"
-        markdown += f"Generated at: {now.strftime('%H:%M')} {TIMEZONE}\n"
-        
-        return markdown
-    
-    @staticmethod
-    def format_scoring_example(item: Dict) -> str:
-        """
-        Format a scoring breakdown example as Markdown.
-        
-        Args:
-            item: Item to show scoring for.
-        
-        Returns:
-            str: Markdown formatted scoring breakdown.
-        """
-        markdown = f"## Scoring Breakdown Example\n\n"
-        markdown += f"**Item:** {item.get('title', item.get('text', 'Unknown'))}\n\n"
-        markdown += f"### Score Components\n\n"
-        markdown += f"- **Base Score:** {item.get('base_score', 0)} points\n"
-        markdown += f"- **Content Multipliers:** +15 points (regulation keyword)\n"
-        markdown += f"- **Recency Bonus:** +10 points (within 6 hours)\n"
-        markdown += f"- **Total Impact Score:** {item.get('impact_score', 0)}/10\n"
-        
-        return markdown
+        return DiscordFormatter.CATEGORY_NAMES.get(category, "News")
