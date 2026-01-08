@@ -1,6 +1,6 @@
 """
 Discord formatter module for Crypto Morning Pulse Bot.
-Optimized for clean links, continuous numbering, and no system messages.
+Optimized for clean links, continuous numbering, and dynamic batching to respect Discord's 2000 char limit.
 """
 
 from datetime import datetime
@@ -26,21 +26,31 @@ class DiscordFormatter:
 
     @staticmethod
     def create_batches(data: Dict) -> List[str]:
-        """Create three batches of messages without "continued" markers."""
+        """Create message batches with dynamic character counting to respect Discord's 2000 limit."""
         now = datetime.now()
         date_str = now.strftime("%b %d, %Y")
         batches = []
-        
-        # --- Batch 1: Market Overview + Today's Focus ---
+        current_batch = ""
+        limit = 1900 # Safe limit slightly below 2000
+
+        def add_to_batch(text: str):
+            nonlocal current_batch, batches
+            if len(current_batch) + len(text) > limit:
+                batches.append(current_batch.strip())
+                current_batch = text
+            else:
+                current_batch += text
+
+        # --- Part 1: Header & Market Overview & Today's Focus ---
         overview = data.get('market_overview', {})
         btc = overview.get('btc', {})
         eth = overview.get('eth', {})
         xrp = overview.get('xrp', {})
         todays_focus = data.get('todays_focus', "市場動態觀察中。")
         
-        batch1 = (
-            f"Crypto Morning Pulse | {date_str}\n"
-            f"Here's what's moving markets today\n\n"
+        header = (
+            f"**Crypto Morning Pulse | {date_str}**\n"
+            f"*Here's what's moving markets today*\n\n"
             f"**市場概況** (過去24小時)\n"
             f"• BTC: ${btc.get('usd', 0):,.0f} ({btc.get('usd_24h_change', 0):+.1f}%)\n"
             f"• ETH: ${eth.get('usd', 0):,.0f} ({eth.get('usd_24h_change', 0):+.1f}%)\n"
@@ -48,11 +58,12 @@ class DiscordFormatter:
             f"• 總市值: {DiscordFormatter.format_currency(overview.get('total_market_cap', 0))} ({overview.get('market_cap_change', 0):+.1f}%)\n"
             f"• 恐懼貪婪指數: {overview.get('fng_value', 'N/A')} ({overview.get('fng_classification', 'N/A')})\n\n"
             f"**今日重點:** {todays_focus}\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         )
-        batches.append(batch1)
-        
-        # --- Batch 2: Market Dynamics (News) ---
+        add_to_batch(header)
+
+        # --- Part 2: Market Dynamics (News) ---
+        add_to_batch("**Market Dynamics**\n\n")
         news_items = data.get('news_items', [])
         categories = {
             "macro_policy": "Macro/Policy",
@@ -68,43 +79,44 @@ class DiscordFormatter:
             if cat in grouped_news:
                 grouped_news[cat].append(item)
         
-        batch2 = "**Market Dynamics**\n\n"
         news_counter = 1
         for cat_id, cat_name in categories.items():
             items = grouped_news[cat_id]
             if not items: continue
             
-            batch2 += f"**{cat_name}**\n"
+            add_to_batch(f"**{cat_name}**\n")
             for item in items:
                 summary = item.get('summary_rewritten', item.get('title', ''))
                 source = item.get('source', 'Unknown')
                 url = item.get('url', '')
                 img_url = item.get('image_url', '')
                 
-                # Format: 1. **[關鍵詞]** - [摘要] | 來源 | [連結](URL) | [📷](IMG_URL)
-                # Note: No raw URL displayed, only the word "連結" as a hyperlink
                 line = f"{news_counter}. {summary} | {source} | [連結]({url})"
                 if img_url:
                     line += f" | [📷]({img_url})"
-                batch2 += line + "\n"
+                add_to_batch(line + "\n")
                 news_counter += 1
-            batch2 += "\n"
+            add_to_batch("\n")
         
-        batch2 += "━━━━━━━━━━━━━━━━━━━━━━━━━"
-        batches.append(batch2)
-        
-        # --- Batch 3: Community Spotlight (X Posts) ---
+        add_to_batch("━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+
+        # --- Part 3: Community Spotlight (X Posts) ---
+        add_to_batch("**Community Spotlight**\n\n**X Trending Posts**\n")
         x_posts = data.get('x_posts', [])
-        batch3 = "**Community Spotlight**\n\n**X Trending Posts**\n"
         for i, post in enumerate(x_posts[:5], 1):
-            # Format: 1. **[@用戶名]** - [摘要] | 互動數: XXk likes | [連結](URL)
-            batch3 += f"{i}. **[@{post['username']}]** - {post['text']} | 互動數: {post['likes']} likes | [貼文連結]({post['url']})\n"
+            line = f"{i}. **[@{post['username']}]** - {post['text']} | 互動數: {post['likes']} likes | [貼文連結]({post['url']})\n"
+            add_to_batch(line)
             
-        batch3 += (
+        # --- Footer ---
+        footer = (
             f"\n━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"Powered by Manus AI | Data: X, CryptoPanic, CoinGecko\n"
             f"Generated at: {now.strftime('%H:%M')} UTC+8"
         )
-        batches.append(batch3)
-        
+        add_to_batch(footer)
+
+        # Finalize batches
+        if current_batch:
+            batches.append(current_batch.strip())
+            
         return batches
