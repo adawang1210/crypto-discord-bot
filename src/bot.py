@@ -24,7 +24,11 @@ from src.logger import logger
 
 class CryptoBot(commands.Bot):
     def __init__(self):
-        intents = discord.Intents.all()
+        # Use explicit intents
+        intents = discord.Intents.default()
+        intents.message_content = True
+        intents.guilds = True
+        intents.messages = True
         super().__init__(command_prefix="!", intents=intents)
         self.tz = pytz.timezone(TIMEZONE)
 
@@ -70,13 +74,11 @@ class CryptoBot(commands.Bot):
             logger.info(">>> [STEP 4 DONE] Summarization complete")
             
             # 3.5 Extract images for selected news
-            logger.info(">>> [STEP 5] Extracting images...")
             async with DataFetcher() as fetcher:
                 for item in enhanced_news:
                     img_url = await fetcher.extract_og_image(item.get('url', ''))
                     if img_url:
                         item['image_url'] = img_url
-            logger.info(">>> [STEP 5 DONE] Image extraction complete")
             
             # 4. Prepare final data
             final_data = {
@@ -86,22 +88,18 @@ class CryptoBot(commands.Bot):
             }
             
             # 5. Generate "Today's Focus"
-            logger.info(">>> [STEP 6] Generating Today's Focus...")
             async with ContentSummarizer() as summarizer:
                 todays_focus = await summarizer.generate_todays_focus(
                     final_data['market_overview'], 
                     final_data['news_items']
                 )
                 final_data['todays_focus'] = todays_focus
-            logger.info(">>> [STEP 6 DONE] Today's Focus generated")
 
             # 6. Create batches and send
-            logger.info(">>> [STEP 7] Formatting and sending to Discord...")
             batches = DiscordFormatter.create_batches(final_data)
             channel = self.get_channel(DISCORD_CHANNEL_ID)
             if channel:
                 for i, batch in enumerate(batches, 1):
-                    logger.info(f">>> Sending batch {i}/{len(batches)}...")
                     await channel.send(batch)
                     await asyncio.sleep(1)
                 logger.info(">>> [SUCCESS] Daily briefing posted successfully")
@@ -115,19 +113,29 @@ class CryptoBot(commands.Bot):
 
     async def on_ready(self):
         logger.info(f"Logged in as {self.user.name} (ID: {self.user.id})")
-        logger.info("------ Bot is ready and listening for commands ------")
+        logger.info("------ Bot is ready and listening ------")
+
+    async def on_message(self, message):
+        # DEBUG LOG: See every message the bot receives
+        if message.author == self.user:
+            return
+            
+        logger.info(f"[DEBUG] I saw a message: '{message.content}' from {message.author} in channel {message.channel.id}")
+        
+        # Manual command handling as a fallback
+        if message.content.strip() == "!crypto-pulse-now":
+            logger.info("[DEBUG] Manual trigger detected via on_message!")
+            await message.channel.send("⏳ 正在生成今日簡報，請稍候...")
+            asyncio.create_task(self.post_daily_briefing())
+            return
+
+        await self.process_commands(message)
 
     @commands.command(name="crypto-pulse-now")
     async def trigger_briefing(self, ctx):
-        logger.info(f"Manual trigger requested by {ctx.author}")
-        # Immediate feedback to test if bot can send messages
+        logger.info(f"Manual trigger requested by {ctx.author} via command handler")
         await ctx.send("⏳ 正在生成今日簡報，請稍候...")
-        
-        success = await self.post_daily_briefing()
-        if success:
-            await ctx.send("✅ 簡報已成功發布！")
-        else:
-            await ctx.send("❌ 簡報發布失敗，請檢查日誌。")
+        await self.post_daily_briefing()
 
 async def run_bot():
     bot = CryptoBot()
