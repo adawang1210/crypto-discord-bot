@@ -49,6 +49,16 @@ class DiscordFormatter:
         
         # Add items as fields
         for idx, item in enumerate(items, 1):
+            # Determine category based on item type
+            item_type = item.get("type", "news")
+            if item_type == "trending":
+                category = "trending"
+            else:
+                category = item.get("category", "macro_policy")
+            
+            emoji = CATEGORY_EMOJIS.get(category, "📰")
+            category_name = DiscordFormatter._format_category_name(category)
+            
             # Use Chinese title if available, otherwise use English
             title_zh = item.get("title_zh", item.get("title", ""))
             summary = item.get("summary", "")
