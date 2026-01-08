@@ -24,9 +24,8 @@ from src.logger import logger
 
 class CryptoBot(commands.Bot):
     def __init__(self):
-        intents = discord.Intents.default()
-        intents.message_content = True
-        intents.guilds = True
+        # Enable all intents to ensure message content and other events are captured
+        intents = discord.Intents.all()
         super().__init__(command_prefix="!", intents=intents)
         self.tz = pytz.timezone(TIMEZONE)
 
@@ -105,11 +104,28 @@ class CryptoBot(commands.Bot):
 
     async def on_ready(self):
         logger.info(f"Logged in as {self.user.name} (ID: {self.user.id})")
-        logger.info("------ Bot is ready ------")
+        logger.info("------ Bot is ready and listening for commands ------")
+
+    async def on_message(self, message):
+        # Ignore messages from the bot itself
+        if message.author == self.user:
+            return
+
+        # Log received messages for debugging
+        if message.content.startswith("!"):
+            logger.info(f"Received command: {message.content} from {message.author}")
+
+        # Process commands
+        await self.process_commands(message)
 
     @commands.command(name="crypto-pulse-now")
     async def trigger_briefing(self, ctx):
         logger.info(f"Manual trigger requested by {ctx.author}")
+        # Add a reaction to let the user know the command was received
+        try:
+            await ctx.message.add_reaction("👀")
+        except: pass
+        
         asyncio.create_task(self.post_daily_briefing())
 
 async def run_bot():
