@@ -135,7 +135,7 @@ class CryptoMorningPulseBot(commands.Cog):
             
             # Select top items with category diversity
             selected_items = self.scorer.select_top_items_with_diversity(
-                kol_posts=[],  # KOL posts would come from data_fetcher if available
+                kol_posts=data.get("kol_posts", []),
                 news_items=unique_items,
                 total_items=5
             )
@@ -272,7 +272,7 @@ async def setup(bot: commands.Bot):
     await bot.add_cog(CryptoMorningPulseBot(bot))
 
 
-def run_bot():
+async def run_bot():
     """
     Run the Discord bot.
     """
@@ -293,6 +293,6 @@ def run_bot():
         logger.error(f"Command error: {str(error)}")
         await ctx.send(f"❌ Error: {str(error)}")
     
-    asyncio.run(setup(bot))
-    
-    bot.run(DISCORD_BOT_TOKEN)
+    async with bot:
+        await setup(bot)
+        await bot.start(DISCORD_BOT_TOKEN)

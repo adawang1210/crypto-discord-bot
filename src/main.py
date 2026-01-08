@@ -30,6 +30,8 @@ async def main() -> None:
     # Run the bot
     try:
         await run_bot()
+    except asyncio.CancelledError:
+        logger.info("Bot task cancelled")
     except KeyboardInterrupt:
         logger.info("Bot interrupted by user")
     except Exception as e:
