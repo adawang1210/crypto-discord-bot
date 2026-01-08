@@ -1,6 +1,7 @@
 """
 Discord formatter module for Crypto Morning Pulse Bot.
 Implements the new layout with Market Overview, News, and X Trending.
+Includes safety checks for Discord embed limits.
 """
 
 from datetime import datetime
@@ -9,8 +10,15 @@ from typing import List, Dict
 
 
 class DiscordFormatter:
-    """Formats crypto data into the new Discord embed layout."""
+    """Formats crypto data into the new Discord embed layout with safety limits."""
     
+    @staticmethod
+    def truncate(text: str, limit: int) -> str:
+        """Truncate text to a specific limit with ellipsis."""
+        if not text:
+            return ""
+        return (text[:limit-3] + "...") if len(text) > limit else text
+
     @staticmethod
     def format_currency(value: float) -> str:
         """Format large numbers into $X.XXT or $XX.XX億."""
@@ -24,13 +32,18 @@ class DiscordFormatter:
 
     @staticmethod
     def create_daily_briefing_embed(data: Dict) -> discord.Embed:
-        """Create the new structured daily briefing embed."""
+        """Create the new structured daily briefing embed with safety limits."""
         now = datetime.now()
-        date_str = now.strftime("%b %d, %2026")
+        date_str = now.strftime("%b %d, %Y")
+        
+        # Title limit: 256
+        title = DiscordFormatter.truncate(f"Crypto Morning Pulse | {date_str}", 256)
+        # Description limit: 4096
+        description = DiscordFormatter.truncate("Here's what's moving markets today", 4096)
         
         embed = discord.Embed(
-            title=f"Crypto Morning Pulse | {date_str}",
-            description="Here's what's moving markets today",
+            title=title,
+            description=description,
             color=0xF7931A,
             timestamp=now
         )
@@ -48,7 +61,12 @@ class DiscordFormatter:
             f"• 總市值: {DiscordFormatter.format_currency(overview.get('total_market_cap', 0))} ({overview.get('market_cap_change', 0):+.1f}%)\n"
             f"• 恐懼貪婪指數: {overview.get('fng_value', 'N/A')} ({overview.get('fng_classification', 'N/A')})"
         )
-        embed.add_field(name="**市場概況** (過去24小時)", value=market_text, inline=False)
+        # Field value limit: 1024
+        embed.add_field(
+            name=DiscordFormatter.truncate("**市場概況** (過去24小時)", 256), 
+            value=DiscordFormatter.truncate(market_text, 1024), 
+            inline=False
+        )
         
         # Visual Separator
         embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━━━━", inline=False)
@@ -64,7 +82,6 @@ class DiscordFormatter:
         }
         
         news_text = ""
-        # Group news by category (simplified for now)
         for item in news_items[:4]:
             cat_name = categories.get(item.get('category', 'macro_policy'), "Macro/Policy")
             summary = item.get('summary_rewritten', item.get('title', ''))
@@ -72,7 +89,11 @@ class DiscordFormatter:
             news_text += f"**{cat_name}**\n• {summary} | {source}\n\n"
         
         if news_text:
-            embed.add_field(name="**市場動態**", value=news_text, inline=False)
+            embed.add_field(
+                name=DiscordFormatter.truncate("**市場動態**", 256), 
+                value=DiscordFormatter.truncate(news_text, 1024), 
+                inline=False
+            )
             
         # Visual Separator
         embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━━━━", inline=False)
@@ -84,11 +105,17 @@ class DiscordFormatter:
             x_text += f"• **[@{post['username']}]** - {post['text']} | 互動數: {post['likes']} likes\n"
             
         if x_text:
-            embed.add_field(name="**社群焦點**\n\nX Trending Posts", value=x_text, inline=False)
+            embed.add_field(
+                name=DiscordFormatter.truncate("**社群焦點**\n\nX Trending Posts", 256), 
+                value=DiscordFormatter.truncate(x_text, 1024), 
+                inline=False
+            )
             
-        # Footer
-        embed.set_footer(
-            text=f"Powered by Manus AI | Data: X, CryptoPanic, CoinGecko\nGenerated at: {now.strftime('%H:%M')} UTC+8"
+        # Footer limit: 2048
+        footer_text = DiscordFormatter.truncate(
+            f"Powered by Manus AI | Data: X, CryptoPanic, CoinGecko\nGenerated at: {now.strftime('%H:%M')} UTC+8",
+            2048
         )
+        embed.set_footer(text=footer_text)
         
         return embed
