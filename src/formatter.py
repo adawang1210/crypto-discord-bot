@@ -1,6 +1,6 @@
 """
 Discord formatter module for Crypto Morning Pulse Bot.
-Implements batch output, continuous numbering, and the new "Today's Focus" section.
+Optimized for clean links, continuous numbering, and no system messages.
 """
 
 from datetime import datetime
@@ -8,7 +8,7 @@ from typing import List, Dict
 
 
 class DiscordFormatter:
-    """Formats crypto data into batches for Discord's 2000 character limit."""
+    """Formats crypto data into clean batches for Discord."""
     
     @staticmethod
     def truncate(text: str, limit: int) -> str:
@@ -26,7 +26,7 @@ class DiscordFormatter:
 
     @staticmethod
     def create_batches(data: Dict) -> List[str]:
-        """Create three batches of messages as requested."""
+        """Create three batches of messages without "continued" markers."""
         now = datetime.now()
         date_str = now.strftime("%b %d, %Y")
         batches = []
@@ -48,8 +48,7 @@ class DiscordFormatter:
             f"• 總市值: {DiscordFormatter.format_currency(overview.get('total_market_cap', 0))} ({overview.get('market_cap_change', 0):+.1f}%)\n"
             f"• 恐懼貪婪指數: {overview.get('fng_value', 'N/A')} ({overview.get('fng_classification', 'N/A')})\n\n"
             f"**今日重點:** {todays_focus}\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"[續下則訊息...]"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━"
         )
         batches.append(batch1)
         
@@ -83,6 +82,7 @@ class DiscordFormatter:
                 img_url = item.get('image_url', '')
                 
                 # Format: 1. **[關鍵詞]** - [摘要] | 來源 | [連結](URL) | [📷](IMG_URL)
+                # Note: No raw URL displayed, only the word "連結" as a hyperlink
                 line = f"{news_counter}. {summary} | {source} | [連結]({url})"
                 if img_url:
                     line += f" | [📷]({img_url})"
@@ -90,7 +90,7 @@ class DiscordFormatter:
                 news_counter += 1
             batch2 += "\n"
         
-        batch2 += "━━━━━━━━━━━━━━━━━━━━━━━━━\n[續下則訊息...]"
+        batch2 += "━━━━━━━━━━━━━━━━━━━━━━━━━"
         batches.append(batch2)
         
         # --- Batch 3: Community Spotlight (X Posts) ---
