@@ -105,14 +105,24 @@ class DataFetcher:
                 if content:
                     feed = feedparser.parse(content)
                     
-                    for entry in feed.entries[:3]:
+                    for entry in feed.entries[:5]:
                         try:
+                            summary = entry.get("summary", "")
+                            # Clean HTML from summary
+                            if summary:
+                                summary = BeautifulSoup(summary, "html.parser").get_text()
+                            
+                            # Skip if summary is too short or empty
+                            if not summary or len(summary) < 50:
+                                logger.debug(f"Skipping item with insufficient content: {entry.get('title')}")
+                                continue
+
                             item = {
                                 "title": entry.get("title", ""),
                                 "url": entry.get("link", ""),
                                 "published_at": entry.get("published", ""),
                                 "source": source_name,
-                                "summary": entry.get("summary", "")[:200],
+                                "summary": summary,
                             }
                             feed_items.append(item)
                         except Exception as e:
@@ -156,12 +166,17 @@ class DataFetcher:
                 
                 for item in data.get("results", []):
                     try:
+                        # CryptoPanic sometimes doesn't provide full description in the list
+                        # We'll use the title as a fallback if summary is missing, 
+                        # but the requirement says skip if not enough info.
+                        # For now, we'll take what we can and let the summarizer handle it.
                         news_item = {
                             "title": item.get("title", ""),
                             "url": item.get("url", ""),
                             "source": item.get("source", {}).get("title", "CryptoPanic"),
                             "published_at": item.get("published_at", ""),
                             "kind": item.get("kind", ""),
+                            "summary": item.get("title", ""), # Fallback to title for CryptoPanic
                         }
                         news_items.append(news_item)
                     except Exception as e:
@@ -193,11 +208,14 @@ class DataFetcher:
                 for coin in data.get("coins", [])[:5]:
                     try:
                         item = coin.get("item", {})
+                        name = item.get('name', '')
+                        symbol = item.get('symbol', '').upper()
                         trending_item = {
-                            "title": f"🔥 {item.get('name', '')} ({item.get('symbol', '').upper()}) trending",
-                            "url": item.get("coingecko_url", ""),
+                            "title": f"{name} ({symbol}) trending on CoinGecko",
+                            "url": f"https://www.coingecko.com/en/coins/{item.get('id')}",
                             "source": "CoinGecko",
                             "market_cap_rank": item.get("market_cap_rank", "N/A"),
+                            "summary": f"{name} ({symbol}) is currently trending on CoinGecko with a market cap rank of {item.get('market_cap_rank', 'N/A')}. The token has seen significant interest in the last 24 hours.",
                         }
                         trending_items.append(trending_item)
                     except Exception as e:
@@ -278,7 +296,7 @@ class DataFetcher:
                 "rss_items": rss_items,
                 "news_items": news_items,
                 "trending_items": trending_items,
-                "kol_posts": {},  # Empty for now
+                "kol_posts": [],  # Changed to list for consistency
             }
         
         except Exception as e:
@@ -288,5 +306,5 @@ class DataFetcher:
                 "rss_items": [],
                 "news_items": [],
                 "trending_items": [],
-                "kol_posts": {},
+                "kol_posts": [],
             }

@@ -61,9 +61,9 @@ class DiscordFormatter:
         )
         
         # Add items as fields
-        for idx, item in enumerate(items, 1):
+        for item in items:
             category = item.get("category", "macro_policy")
-            category_display = DiscordFormatter.CATEGORY_NAMES.get(category, "News")
+            category_display = DiscordFormatter.CATEGORY_NAMES.get(category, "Macro/Policy")
             
             # Get rewritten summary (improved content)
             summary = item.get("summary_rewritten", item.get("summary", ""))
@@ -73,15 +73,12 @@ class DiscordFormatter:
             source_name = item.get("source_name", item.get("source", "Unknown"))
             
             # Build field value: Category + Summary + Source
-            field_value = f"**{category_display}:** {summary}"
+            # Format: **{Category}:** {Summary}\n**[{Source}]({URL})**
+            field_value = f"**{category_display}:** {summary}\n**[{source_name}]({source_url})**"
             
-            # Add source link if available
-            if source_url:
-                field_value += f"\n**[{source_name}]({source_url})**"
-            
-            # Add field to embed with numbering
+            # Add field to embed without numbering
             embed.add_field(
-                name=f"{idx}.",
+                name="\u200b", # Zero-width space for name to keep it clean
                 value=field_value,
                 inline=False
             )
@@ -95,7 +92,7 @@ class DiscordFormatter:
         
         # Add footer with data sources
         embed.set_footer(
-            text="Powered by Manus AI | Data: X, CryptoPanic, CoinGecko"
+            text=f"Powered by Manus AI | Data: X, CryptoPanic, CoinGecko\nGenerated at: {now.strftime('%H:%M')} UTC+8"
         )
         
         # Add image if available (set as embed image for the last item)
@@ -215,4 +212,4 @@ class DiscordFormatter:
         Returns:
             str: Formatted category name.
         """
-        return DiscordFormatter.CATEGORY_NAMES.get(category, "News")
+        return DiscordFormatter.CATEGORY_NAMES.get(category, "Macro/Policy")

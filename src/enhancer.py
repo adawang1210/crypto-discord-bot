@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup
 import re
 
 from src.logger import logger
+from src.summarizer import ContentSummarizer
 
 
 class ContentEnhancer:
@@ -19,6 +20,7 @@ class ContentEnhancer:
         """Initialize content enhancer."""
         self.session: Optional[aiohttp.ClientSession] = None
         self.translate_url = "https://api.mymemory.translated.net/get"
+        self.summarizer = ContentSummarizer()
     
     async def __aenter__(self):
         """Async context manager entry."""
@@ -79,7 +81,7 @@ class ContentEnhancer:
     async def extract_summary(
         self,
         html_content: str,
-        max_length: int = 150
+        max_length: int = 500
     ) -> str:
         """
         Extract summary from HTML content.
@@ -113,7 +115,7 @@ class ContentEnhancer:
                     # Get paragraphs from article
                     paragraphs = element.find_all("p")
                     if paragraphs:
-                        article_text = " ".join([p.get_text().strip() for p in paragraphs[:5]])
+                        article_text = " ".join([p.get_text().strip() for p in paragraphs[:10]])
                         break
                     else:
                         article_text = element.get_text()
@@ -125,47 +127,15 @@ class ContentEnhancer:
                 if body:
                     paragraphs = body.find_all("p")
                     if paragraphs:
-                        article_text = " ".join([p.get_text().strip() for p in paragraphs[:5]])
+                        article_text = " ".join([p.get_text().strip() for p in paragraphs[:10]])
                     else:
                         article_text = body.get_text()
             
             # Clean up text - remove extra whitespace
             article_text = re.sub(r"\s+", " ", article_text).strip()
             
-            # Remove common non-article patterns (prices, tables, etc.)
-            article_text = re.sub(r"\$[0-9,]+\.?[0-9]*%?", "", article_text)  # Remove prices
-            article_text = re.sub(r"[0-9]+\.[0-9]+%", "", article_text)  # Remove percentages
-            article_text = re.sub(r"\b[A-Z]{2,}\b\s+\$", "", article_text)  # Remove ticker prices
-            
-            # Clean up again
-            article_text = re.sub(r"\s+", " ", article_text).strip()
-            
-            # Extract first sentences to reach max_length
-            sentences = re.split(r"(?<=[.!?])\s+", article_text)
-            summary = ""
-            
-            for sentence in sentences:
-                sentence = sentence.strip()
-                if not sentence or len(sentence) < 5:
-                    continue
-                
-                if len(summary) + len(sentence) + 1 <= max_length:
-                    summary += sentence + " "
-                else:
-                    break
-            
-            summary = summary.strip()
-            
-            # Ensure we have at least some content
-            if not summary:
-                # Last resort: just take first max_length characters
-                summary = article_text[:max_length].strip()
-            
-            if summary and len(summary) > 20:
-                logger.info(f"✅ Extracted summary: {summary[:50]}...")
-                return summary
-            
-            return ""
+            # Limit to max_length for summarization
+            return article_text[:max_length]
         
         except Exception as e:
             logger.debug(f"Summary extraction error: {str(e)}")
@@ -226,12 +196,6 @@ class ContentEnhancer:
             Dict: Enhanced item with title_zh, summary, and image_url.
         """
         try:
-            # Translate title
-            title = item.get("title", "")
-            if title:
-                title_zh = await self.translate_to_chinese(title)
-                item["title_zh"] = title_zh
-            
             # Extract summary and image from URL if available
             url = item.get("url", "")
             if url and url.startswith("http"):
@@ -244,10 +208,10 @@ class ContentEnhancer:
                         if response.status == 200:
                             html_content = await response.text()
                             
-                            # Extract summary
-                            summary = await self.extract_summary(html_content, max_length=150)
-                            if summary:
-                                item["summary"] = summary
+                            # Extract full content for summarization
+                            full_content = await self.extract_summary(html_content, max_length=1000)
+                            if full_content:
+                                item["summary"] = full_content
                             
                             # Extract image
                             image_url = await self.extract_image(html_content)
@@ -257,6 +221,10 @@ class ContentEnhancer:
                     logger.warning(f"Timeout fetching {url[:50]}...")
                 except Exception as e:
                     logger.debug(f"Error fetching URL {url}: {str(e)}")
+            
+            # Use the new summarizer to rewrite the summary in Traditional Chinese
+            category = item.get("category", "macro_policy")
+            item = await self.summarizer.summarize_item(item, category)
             
             return item
         
@@ -277,7 +245,7 @@ class ContentEnhancer:
         try:
             # Create tasks with timeout
             tasks = [
-                asyncio.wait_for(self.enhance_item(item), timeout=15)
+                asyncio.wait_for(self.enhance_item(item), timeout=20)
                 for item in items
             ]
             

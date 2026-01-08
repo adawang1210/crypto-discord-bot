@@ -6,7 +6,9 @@ Rewrites extracted content into concise, high-quality summaries in Traditional C
 import asyncio
 import aiohttp
 import re
+import os
 from typing import Optional, Dict, List
+from openai import OpenAI
 from src.logger import logger
 
 
@@ -15,146 +17,63 @@ class ContentSummarizer:
     
     def __init__(self):
         """Initialize content summarizer."""
-        self.session: Optional[aiohttp.ClientSession] = None
-        # Using a free summarization API or local logic
-        self.summarize_url = "https://api.cohere.com/v1/summarize"  # Fallback to local logic
+        self.client = OpenAI() # Uses environment variables for API key and base URL
     
-    async def __aenter__(self):
-        """Async context manager entry."""
-        self.session = aiohttp.ClientSession()
-        return self
-    
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        if self.session:
-            await self.session.close()
-    
-    def _extract_key_info(self, text: str, title: str) -> Dict[str, str]:
+    async def _rewrite_with_llm(self, title: str, text: str, category: str) -> str:
         """
-        Extract key information from text: who, what, impact.
-        
-        Args:
-            text: Article text to analyze.
-            title: Article title.
-        
-        Returns:
-            Dict with 'subject', 'action', 'impact' keys.
+        Use LLM to rewrite the summary in Traditional Chinese.
         """
-        info = {
-            "subject": "",
-            "action": "",
-            "impact": ""
-        }
-        
+        prompt = f"""
+你是一個專業的加密貨幣新聞編輯。請將以下新聞內容改寫為一段簡潔的繁體中文摘要。
+
+要求：
+1. 長度：1-2 句話，總字數在 200-280 字元之間。
+2. 重點：突出「誰做了什麼」以及「影響是什麼」。
+3. 語言：使用繁體中文，但保留專有名詞（如公司名、代幣名、人名）為英文。
+4. 風格：不要直接複製原文，要用自己的話重新表述。
+5. 類別：{category}
+
+新聞標題：{title}
+新聞內容：{text}
+
+請直接輸出改寫後的摘要，不要包含任何其他文字。
+"""
         try:
-            # Clean text
-            text = text.strip()
-            sentences = re.split(r'[.!?]\s+', text)
-            
-            if not sentences:
-                return info
-            
-            # First sentence usually contains the main subject and action
-            if len(sentences) > 0:
-                first_sent = sentences[0].strip()
-                info["action"] = first_sent[:150]  # Main action
-            
-            # Look for impact in subsequent sentences
-            for sent in sentences[1:3]:
-                sent = sent.strip()
-                if any(keyword in sent.lower() for keyword in ['rise', 'fall', 'surge', 'crash', 'impact', 'affect', 'lead', 'result', 'cause']):
-                    info["impact"] = sent[:100]
-                    break
-            
-            # Extract subject from title or first sentence
-            # Common patterns: "Company/Person does something"
-            title_words = title.split()
-            if len(title_words) > 0:
-                # Usually first 2-3 words contain the subject
-                info["subject"] = " ".join(title_words[:3])
-            
-            return info
-        
+            # Run in executor to avoid blocking event loop
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: self.client.chat.completions.create(
+                    model="gpt-4.1-mini",
+                    messages=[
+                        {"role": "system", "content": "你是一個專業的加密貨幣新聞編輯，擅長撰寫簡潔、專業的繁體中文摘要。"},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=300,
+                    temperature=0.7
+                )
+            )
+            summary = response.choices[0].message.content.strip()
+            return summary
         except Exception as e:
-            logger.debug(f"Error extracting key info: {str(e)}")
-            return info
-    
-    def _rewrite_summary(
+            logger.error(f"Error calling LLM for summarization: {str(e)}")
+            return ""
+
+    def _rewrite_summary_local(
         self,
         title: str,
         text: str,
         category: str
     ) -> str:
         """
-        Rewrite content into a concise 1-2 sentence summary in Traditional Chinese.
-        
-        Args:
-            title: Article title.
-            text: Article text.
-            category: Content category.
-        
-        Returns:
-            str: Rewritten summary in Traditional Chinese.
+        Fallback local logic for rewriting summary if LLM fails.
         """
-        try:
-            # Extract key information
-            info = self._extract_key_info(text, title)
-            
-            # Build summary based on category
-            summary = ""
-            
-            if category == "macro_policy":
-                # Format: "政策/事件 + 影響"
-                if info["action"]:
-                    summary = info["action"]
-                    if info["impact"]:
-                        summary += f"，{info['impact']}"
-            
-            elif category == "capital_flow":
-                # Format: "資金流向 + 數量/影響"
-                if "drain" in text.lower() or "flow" in text.lower():
-                    summary = info["action"]
-                    if info["impact"]:
-                        summary += f"，{info['impact']}"
-            
-            elif category == "major_coins":
-                # Format: "代幣 + 價格/活動變化"
-                if info["action"]:
-                    summary = info["action"]
-                    if info["impact"]:
-                        summary += f"，{info['impact']}"
-            
-            elif category == "altcoins_trending":
-                # Format: "代幣 + 趨勢/原因"
-                if info["action"]:
-                    summary = info["action"]
-                    if info["impact"]:
-                        summary += f"，{info['impact']}"
-            
-            elif category == "tech_narratives":
-                # Format: "技術/敘事 + 進展"
-                if info["action"]:
-                    summary = info["action"]
-                    if info["impact"]:
-                        summary += f"，{info['impact']}"
-            
-            elif category == "kol_insights":
-                # Format: "KOL + 觀點/行動"
-                if info["action"]:
-                    summary = info["action"]
-                    if info["impact"]:
-                        summary += f"，{info['impact']}"
-            
-            # Limit to 200-280 characters
-            if len(summary) > 280:
-                summary = summary[:277] + "..."
-            
-            return summary.strip()
-        
-        except Exception as e:
-            logger.debug(f"Error rewriting summary: {str(e)}")
-            return ""
-    
+        # Simple extraction logic as a fallback
+        summary = f"{title}。{text[:100]}"
+        if len(summary) > 280:
+            summary = summary[:277] + "..."
+        return summary
+
     async def summarize_item(
         self,
         item: Dict,
@@ -177,12 +96,16 @@ class ContentSummarizer:
             if not title or not summary:
                 return item
             
-            # Rewrite summary
-            rewritten = self._rewrite_summary(title, summary, category)
+            # Rewrite summary using LLM
+            rewritten = await self._rewrite_with_llm(title, summary, category)
             
-            if rewritten and len(rewritten) > 20:
+            # Fallback if LLM fails
+            if not rewritten:
+                rewritten = self._rewrite_summary_local(title, summary, category)
+            
+            if rewritten:
                 item["summary_rewritten"] = rewritten
-                logger.info(f"✅ Rewritten summary: {rewritten[:50]}...")
+                logger.info(f"✅ Rewritten summary for: {title[:30]}...")
             
             return item
         
@@ -207,10 +130,7 @@ class ContentSummarizer:
         """
         try:
             tasks = [
-                asyncio.wait_for(
-                    self.summarize_item(item, cat),
-                    timeout=5
-                )
+                self.summarize_item(item, cat)
                 for item, cat in zip(items, categories)
             ]
             

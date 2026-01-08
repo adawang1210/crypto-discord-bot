@@ -259,15 +259,15 @@ class ContentScorer:
         text = (item.get("title", "") + item.get("summary", "")).lower()
         
         # Simple keyword-based categorization
-        if re.search(r"sec|regulation|law|policy|etf", text):
+        if re.search(r"sec|regulation|law|policy|etf|fed|central bank|government", text):
             return "macro_policy"
-        elif re.search(r"inflow|outflow|whale|transfer|drain", text):
+        elif re.search(r"inflow|outflow|whale|transfer|drain|hack|exploit|funding|raised|investment", text):
             return "capital_flow"
         elif re.search(r"\bbitcoin\b|\bbtc\b|\bethereum\b|\beth\b|\bsolana\b|\bsol\b", text):
             return "major_coins"
-        elif re.search(r"altcoin|token|memecoin|trending|surge|pump", text):
+        elif re.search(r"altcoin|token|memecoin|trending|surge|pump|listing|brevis|brev", text):
             return "altcoins_trending"
-        elif re.search(r"layer|l2|defi|rwa|ai|zk|protocol", text):
+        elif re.search(r"layer|l2|defi|rwa|ai|zk|protocol|infrastructure|mainnet|testnet", text):
             return "tech_narratives"
         else:
             return "macro_policy"  # Default category
@@ -291,54 +291,60 @@ class ContentScorer:
             List[Dict]: Selected items with category diversity.
         """
         selected = []
-        category_count = {}
+        category_count = {cat: 0 for cat in self.VALID_CATEGORIES.keys()}
         
         # Step 1: Add 1 KOL Insights if available
         if kol_posts:
             kol_item = kol_posts[0]
             kol_item["category"] = "kol_insights"
             kol_item["source_name"] = kol_item.get("username", "Unknown")
+            # Ensure KOL posts have a summary field for the summarizer
+            if "summary" not in kol_item and "text" in kol_item:
+                kol_item["summary"] = kol_item["text"]
             selected.append(kol_item)
             category_count["kol_insights"] = 1
         
         # Step 2: Categorize and sort news items
-        categorized_news = {}
+        categorized_news = {cat: [] for cat in self.VALID_CATEGORIES.keys() if cat != "kol_insights"}
         for item in news_items:
             category = self._categorize_news(item)
-            if category not in categorized_news:
-                categorized_news[category] = []
-            categorized_news[category].append(item)
+            if category in categorized_news:
+                categorized_news[category].append(item)
         
         # Step 3: Select items ensuring category diversity
-        remaining_slots = total_items - len(selected)
-        
-        # First pass: take 1 item from each category
-        for category in sorted(categorized_news.keys()):
+        # First pass: take 1 item from each news category that hasn't been filled
+        news_categories = [cat for cat in self.VALID_CATEGORIES.keys() if cat != "kol_insights"]
+        for category in news_categories:
             if len(selected) >= total_items:
                 break
             
-            if category_count.get(category, 0) < 1 and categorized_news[category]:
-                item = categorized_news[category][0]
+            if category_count[category] < 1 and categorized_news[category]:
+                item = categorized_news[category].pop(0)
                 item["category"] = category
                 item["source_name"] = item.get("source", "Unknown")
                 selected.append(item)
                 category_count[category] = 1
         
-        # Second pass: fill remaining slots with highest scoring items
-        for category in sorted(categorized_news.keys()):
+        # Second pass: fill remaining slots with highest scoring items from any category
+        # But still respect the "avoid same category more than 2 times" rule
+        all_remaining_news = []
+        for cat, items in categorized_news.items():
+            for item in items:
+                item["category"] = cat
+                all_remaining_news.append(item)
+        
+        # Sort all remaining news by impact score
+        all_remaining_news.sort(key=lambda x: x.get("impact_score", 0), reverse=True)
+        
+        for item in all_remaining_news:
             if len(selected) >= total_items:
                 break
             
-            # Allow max 2 items per category
-            if category_count.get(category, 0) < 2:
-                for item in categorized_news[category][1:]:
-                    if len(selected) >= total_items:
-                        break
-                    if item not in selected:
-                        item["category"] = category
-                        item["source_name"] = item.get("source", "Unknown")
-                        selected.append(item)
-                        category_count[category] = category_count.get(category, 0) + 1
+            category = item["category"]
+            if category_count[category] < 2:
+                item["source_name"] = item.get("source", "Unknown")
+                selected.append(item)
+                category_count[category] += 1
         
         logger.info(f"✅ Selected {len(selected)} items with category diversity: {category_count}")
         return selected[:total_items]
