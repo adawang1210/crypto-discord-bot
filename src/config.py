@@ -33,7 +33,8 @@ NITTER_INSTANCES: List[str] = os.getenv(
 NITTER_REQUEST_DELAY: float = float(os.getenv("NITTER_REQUEST_DELAY", "3.5"))
 
 # ==================== Scoring Thresholds ====================
-MIN_IMPACT_SCORE: int = int(os.getenv("MIN_IMPACT_SCORE", "7"))
+# Lowered default impact score to ensure content availability
+MIN_IMPACT_SCORE: int = int(os.getenv("MIN_IMPACT_SCORE", "5"))
 MIN_KOL_SCORE: int = int(os.getenv("MIN_KOL_SCORE", "60"))
 
 # ==================== Performance Configuration ====================
@@ -99,12 +100,16 @@ CATEGORY_EMOJIS: Dict[str, str] = {
 }
 
 # ==================== News Sources ====================
+# Expanded news sources to increase content pool
 NEWS_SOURCES: Dict[str, str] = {
-    "coindesk": "https://feeds.coindesk.com/news",
-    "cointelegraph": "https://cointelegraph.com/feed",
+    "coindesk": "https://www.coindesk.com/arc/outboundfeeds/rss/",
+    "cointelegraph": "https://cointelegraph.com/rss",
     "decrypt": "https://decrypt.co/feed",
-    "the_block": "https://www.theblockresearch.com/feed",
-    "whale_alert": "https://whale-alert.io/feed",
+    "the_block": "https://www.theblock.co/rss.xml",
+    "bitcoin_magazine": "https://bitcoinmagazine.com/.rss/full/",
+    "crypto_briefing": "https://cryptobriefing.com/feed/",
+    "newsbtc": "https://www.newsbtc.com/feed/",
+    "beincrypto": "https://beincrypto.com/feed/",
 }
 
 # ==================== Logging Configuration ====================

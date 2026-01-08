@@ -18,6 +18,7 @@ from src.config import (
     REQUEST_TIMEOUT,
     MAX_CONCURRENT_REQUESTS,
     CRYPTOPANIC_API_KEY,
+    NEWS_SOURCES,
 )
 from src.logger import logger
 
@@ -92,20 +93,14 @@ class DataFetcher:
         """
         feed_items = []
         
-        feeds = [
-            ("CoinDesk", "https://feeds.coindesk.com/news"),
-            ("Cointelegraph", "https://cointelegraph.com/feed"),
-            ("Decrypt", "https://decrypt.co/feed"),
-            ("The Block", "https://www.theblockresearch.com/feed"),
-        ]
-        
-        for source_name, feed_url in feeds:
+        for source_name, feed_url in NEWS_SOURCES.items():
             try:
                 content = await self._fetch_url(feed_url)
                 if content:
                     feed = feedparser.parse(content)
                     
-                    for entry in feed.entries[:5]:
+                    # Increased to 10 items per feed to ensure enough content after filtering
+                    for entry in feed.entries[:10]:
                         try:
                             summary = entry.get("summary", "")
                             # Clean HTML from summary
@@ -121,7 +116,7 @@ class DataFetcher:
                                 "title": entry.get("title", ""),
                                 "url": entry.get("link", ""),
                                 "published_at": entry.get("published", ""),
-                                "source": source_name,
+                                "source": source_name.replace("_", " ").title(),
                                 "summary": summary,
                             }
                             feed_items.append(item)
@@ -166,10 +161,6 @@ class DataFetcher:
                 
                 for item in data.get("results", []):
                     try:
-                        # CryptoPanic sometimes doesn't provide full description in the list
-                        # We'll use the title as a fallback if summary is missing, 
-                        # but the requirement says skip if not enough info.
-                        # For now, we'll take what we can and let the summarizer handle it.
                         news_item = {
                             "title": item.get("title", ""),
                             "url": item.get("url", ""),

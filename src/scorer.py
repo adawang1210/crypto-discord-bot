@@ -106,8 +106,8 @@ class ContentScorer:
                 continue
                 
             score = self._calculate_news_quality_score(item)
-            # Lowered threshold slightly to ensure we have enough content
-            if score >= (MIN_IMPACT_SCORE - 1) and not self.is_duplicate(item.get("title", "")):
+            # Ensure we have enough content by accepting items with a reasonable score
+            if score >= 2 and not self.is_duplicate(item.get("title", "")):
                 item["impact_score"] = score
                 scored_items.append(item)
         
