@@ -9,7 +9,9 @@ from discord.ext import commands, tasks
 from datetime import datetime, time
 import pytz
 from typing import Optional, List
+import re
 
+from difflib import SequenceMatcher
 from src.config import (
     DISCORD_BOT_TOKEN,
     DISCORD_CHANNEL_ID,
@@ -17,6 +19,7 @@ from src.config import (
     BOT_OWNER_ID,
     TIMEZONE,
     POSTING_TIME,
+    CONTENT_KEYWORD_MULTIPLIERS,
 )
 from src.logger import logger
 from src.data_fetcher import DataFetcher
@@ -49,13 +52,6 @@ class CryptoMorningPulseBot(commands.Cog):
     async def cog_load(self):
         """Initialize data fetcher when cog loads."""
         self.data_fetcher = DataFetcher()
-        logger.info("CryptoMorningPulseBot cog loaded")
-    
-    def cog_unload(self):
-        """Clean up when cog unloads."""
-        self.daily_post_task.cancel()
-        self.health_check_task.cancel()
-        logger.info("CryptoMorningPulseBot cog unloaded")
     
     @tasks.loop(minutes=1)
     async def daily_post_task(self):
@@ -110,16 +106,43 @@ class CryptoMorningPulseBot(commands.Cog):
             async with DataFetcher() as fetcher:
                 data = await fetcher.fetch_all_data()
             
-            kol_posts = data.get("kol_posts", [])
-            news_items = data.get("news", [])
-            nitter_status = data.get("nitter_status", {})
+            all_items = data.get("items", [])
             
-            # Score and filter content
-            scored_kol_posts = self.scorer.score_kol_posts(kol_posts)
-            scored_news_items = self.scorer.score_news_items(news_items)
+            # Score items
+            scored_items = []
+            for item in all_items:
+                score = item.get("score_base", 5)
+                
+                # Add keyword bonuses
+                title = item.get("title", "").lower()
+                for keyword_pattern, multiplier in CONTENT_KEYWORD_MULTIPLIERS.items():
+                    if re.search(keyword_pattern, title, re.IGNORECASE):
+                        score += multiplier
+                
+                scored_item = {**item, "score": score}
+                scored_items.append(scored_item)
             
-            # Select top items
-            total_items = len(scored_kol_posts) + len(scored_news_items)
+            # Sort by score
+            scored_items.sort(key=lambda x: x.get("score", 0), reverse=True)
+            
+            # Deduplicate
+            unique_items = []
+            for item in scored_items:
+                is_duplicate = False
+                for existing in unique_items:
+                    similarity = SequenceMatcher(
+                        None,
+                        item.get("title", ""),
+                        existing.get("title", "")
+                    ).ratio()
+                    if similarity > 0.6:
+                        is_duplicate = True
+                        break
+                
+                if not is_duplicate:
+                    unique_items.append(item)
+            
+            total_items = len(unique_items)
             
             if total_items < 3:
                 logger.warning(f"Insufficient items for briefing: {total_items}")
@@ -129,12 +152,8 @@ class CryptoMorningPulseBot(commands.Cog):
                 self.consecutive_failures += 1
                 return False
             
-            # Select items ensuring diversity
-            selected_items = self.scorer.select_top_items(
-                scored_kol_posts,
-                scored_news_items,
-                total_items=min(5, total_items)
-            )
+            # Select top items
+            selected_items = unique_items[:min(5, total_items)]
             
             # Add items to cache
             for item in selected_items:
@@ -178,34 +197,16 @@ class CryptoMorningPulseBot(commands.Cog):
             return False
     
     async def send_health_check(self) -> None:
-        """Send health check status to admin channel."""
+        """Send health check report to admin channel."""
         try:
             admin_channel = self.bot.get_channel(ADMIN_CHANNEL_ID)
-            if not admin_channel:
-                logger.warning(f"Admin channel {ADMIN_CHANNEL_ID} not found")
-                return
-            
-            # Prepare health check data
-            posted_successfully = self.consecutive_failures == 0
-            execution_time = 0.0  # Would track actual execution time
-            
-            # Get Nitter status
-            fetcher = DataFetcher()
-            nitter_status = fetcher.nitter_rotator.get_status_report()
-            
-            # Create health check embed
-            embed = DiscordFormatter.create_health_check_embed(
-                posted_successfully=posted_successfully,
-                sources_queried=4,
-                sources_responded=3,
-                nitter_status=nitter_status,
-                execution_time=execution_time,
-                warnings=["Some Nitter instances unstable"] if not all(nitter_status.values()) else None
-            )
-            
-            await admin_channel.send(embed=embed)
-            logger.info("Health check report sent to admin channel")
-        
+            if admin_channel:
+                embed = DiscordFormatter.create_health_check_embed(
+                    self.consecutive_failures,
+                    self.last_post_time
+                )
+                await admin_channel.send(embed=embed)
+                logger.info("Health check report sent")
         except Exception as e:
             logger.error(f"Error sending health check: {str(e)}")
     
@@ -219,84 +220,88 @@ class CryptoMorningPulseBot(commands.Cog):
         try:
             admin_channel = self.bot.get_channel(ADMIN_CHANNEL_ID)
             if admin_channel:
-                embed = DiscordFormatter.create_error_embed(message, "Alert")
-                await admin_channel.send(embed=embed)
+                await admin_channel.send(f"⚠️ {message}")
+                logger.info(f"Admin alert sent: {message}")
         except Exception as e:
             logger.error(f"Error sending admin alert: {str(e)}")
     
     async def send_critical_alert(self, message: str) -> None:
         """
-        Send critical alert to bot owner via DM.
+        Send critical alert message to admin channel.
         
         Args:
-            message: Critical alert message.
+            message: Critical alert message to send.
         """
         try:
-            owner = await self.bot.fetch_user(BOT_OWNER_ID)
-            if owner:
-                embed = DiscordFormatter.create_error_embed(message, "Critical Alert")
-                await owner.send(embed=embed)
-                logger.info(f"Critical alert sent to owner: {message}")
+            admin_channel = self.bot.get_channel(ADMIN_CHANNEL_ID)
+            if admin_channel:
+                await admin_channel.send(f"🚨 {message}")
+                logger.error(f"Critical alert sent: {message}")
         except Exception as e:
             logger.error(f"Error sending critical alert: {str(e)}")
     
     @commands.command(name="crypto-pulse-now")
-    @commands.is_owner()
-    async def manual_trigger(self, ctx: commands.Context) -> None:
+    async def manual_trigger(self, ctx):
         """
         Manually trigger the daily briefing post.
-        Only available to bot owner.
         
         Args:
-            ctx: Command context.
+            ctx: Discord context.
         """
         logger.info(f"Manual trigger requested by {ctx.author}")
-        await ctx.defer()
         
-        success = await self.post_daily_briefing()
+        if ctx.author.id != BOT_OWNER_ID:
+            await ctx.send("❌ Only the bot owner can use this command")
+            return
         
-        if success:
-            await ctx.send("✅ Daily briefing posted successfully!")
-        else:
-            await ctx.send("❌ Failed to post daily briefing. Check logs for details.")
-    
-    @commands.command(name="crypto-pulse-shutdown")
-    @commands.is_owner()
-    async def shutdown_command(self, ctx: commands.Context) -> None:
-        """
-        Shutdown the bot.
-        Only available to bot owner.
-        
-        Args:
-            ctx: Command context.
-        """
-        logger.info(f"Shutdown requested by {ctx.author}")
-        await ctx.send("🛑 Bot shutting down...")
-        await self.bot.close()
+        await self.post_daily_briefing()
+        await ctx.send("✅ Daily briefing posted")
     
     @commands.command(name="crypto-pulse-status")
-    @commands.is_owner()
-    async def status_command(self, ctx: commands.Context) -> None:
+    async def status_command(self, ctx):
         """
-        Get current bot status.
-        Only available to bot owner.
+        Show bot status.
         
         Args:
-            ctx: Command context.
+            ctx: Discord context.
         """
-        await ctx.defer()
+        embed = discord.Embed(
+            title="🤖 Crypto Morning Pulse Bot Status",
+            color=0xF7931A
+        )
+        embed.add_field(
+            name="Last Post",
+            value=self.last_post_time.strftime("%Y-%m-%d %H:%M:%S") if self.last_post_time else "Never",
+            inline=False
+        )
+        embed.add_field(
+            name="Consecutive Failures",
+            value=str(self.consecutive_failures),
+            inline=False
+        )
+        embed.add_field(
+            name="Status",
+            value="🟢 Online" if self.consecutive_failures < self.max_consecutive_failures else "🔴 Degraded",
+            inline=False
+        )
         
-        status_text = f"""
-        **🤖 Crypto Morning Pulse Bot Status**
-        
-        **Uptime:** {self.bot.latency * 1000:.0f}ms
-        **Last Post:** {self.last_post_time or 'Never'}
-        **Consecutive Failures:** {self.consecutive_failures}
-        **Timezone:** {TIMEZONE}
-        **Posting Time:** {POSTING_TIME.strftime('%H:%M')} UTC+8
+        await ctx.send(embed=embed)
+    
+    @commands.command(name="crypto-pulse-shutdown")
+    async def shutdown_command(self, ctx):
         """
+        Shutdown the bot.
         
-        await ctx.send(status_text)
+        Args:
+            ctx: Discord context.
+        """
+        if ctx.author.id != BOT_OWNER_ID:
+            await ctx.send("❌ Only the bot owner can use this command")
+            return
+        
+        logger.info("Bot shutdown requested")
+        await ctx.send("👋 Bot shutting down...")
+        await self.bot.close()
 
 
 async def setup_bot() -> commands.Bot:
