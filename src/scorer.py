@@ -85,11 +85,12 @@ class ContentScorer:
         
         # 2. Broad crypto keywords to ensure it's about the industry
         crypto_keywords = [
-            r"btc", r"eth", r"sol", r"crypto", r"blockchain", r"token", r"etf",
-            r"sec", r"fed", r"regulation", r"market", r"price", r"trading",
-            r"defi", r"nft", r"dao", r"layer", r"wallet", r"exchange", r"binance",
-            r"coinbase", r"funding", r"investment", r"hack", r"exploit", r"web3",
-            r"digital asset", r"stablecoin", r"mining", r"staking"
+            r"btc", r"eth", r"sol", r"xrp", r"ripple", r"zcash", r"zec", r"ada", r"dot", r"avax",
+            r"crypto", r"blockchain", r"token", r"etf", r"ipo", r"sec", r"fed", r"regulation",
+            r"market", r"price", r"trading", r"defi", r"nft", r"dao", r"layer", r"wallet",
+            r"exchange", r"binance", r"coinbase", r"funding", r"investment", r"hack", r"exploit",
+            r"web3", r"digital asset", r"stablecoin", r"mining", r"staking", r"developer", r"devs",
+            r"split", r"launch", r"announcement", r"partnership"
         ]
         
         if any(re.search(p, full_text) for p in crypto_keywords):
