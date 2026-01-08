@@ -1,77 +1,72 @@
 """
 Content summarizer module for Crypto Morning Pulse Bot.
 Rewrites extracted content into concise, high-quality summaries in Traditional Chinese.
+Uses local logic and free translation APIs instead of OpenAI.
 """
 
 import asyncio
 import aiohttp
 import re
-import os
 from typing import Optional, Dict, List
-from openai import OpenAI
 from src.logger import logger
 
 
 class ContentSummarizer:
-    """Summarizes and rewrites content into concise Chinese summaries."""
+    """Summarizes and rewrites content into concise Chinese summaries without OpenAI."""
     
     def __init__(self):
         """Initialize content summarizer."""
-        self.client = OpenAI() # Uses environment variables for API key and base URL
+        self.translate_url = "https://api.mymemory.translated.net/get"
     
-    async def _rewrite_with_llm(self, title: str, text: str, category: str) -> str:
+    async def _translate_text(self, text: str) -> str:
         """
-        Use LLM to rewrite the summary in Traditional Chinese.
+        Translate text to Traditional Chinese using free MyMemory API.
         """
-        prompt = f"""
-你是一個專業的加密貨幣新聞編輯。請將以下新聞內容改寫為一段簡潔的繁體中文摘要。
-
-要求：
-1. 長度：1-2 句話，總字數在 200-280 字元之間。
-2. 重點：突出「誰做了什麼」以及「影響是什麼」。
-3. 語言：使用繁體中文，但保留專有名詞（如公司名、代幣名、人名）為英文。
-4. 風格：不要直接複製原文，要用自己的話重新表述。
-5. 類別：{category}
-
-新聞標題：{title}
-新聞內容：{text}
-
-請直接輸出改寫後的摘要，不要包含任何其他文字。
-"""
-        try:
-            # Run in executor to avoid blocking event loop
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: self.client.chat.completions.create(
-                    model="gpt-4.1-mini",
-                    messages=[
-                        {"role": "system", "content": "你是一個專業的加密貨幣新聞編輯，擅長撰寫簡潔、專業的繁體中文摘要。"},
-                        {"role": "user", "content": prompt}
-                    ],
-                    max_tokens=300,
-                    temperature=0.7
-                )
-            )
-            summary = response.choices[0].message.content.strip()
-            return summary
-        except Exception as e:
-            logger.error(f"Error calling LLM for summarization: {str(e)}")
+        if not text:
             return ""
+        
+        try:
+            # Limit text length for free API
+            text_to_translate = text[:500]
+            params = {
+                "q": text_to_translate,
+                "langpair": "en|zh-TW"
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    self.translate_url,
+                    params=params,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data.get("responseStatus") == 200:
+                            return data.get("responseData", {}).get("translatedText", "")
+        except Exception as e:
+            logger.warning(f"Translation error in summarizer: {str(e)}")
+        
+        return text
 
-    def _rewrite_summary_local(
-        self,
-        title: str,
-        text: str,
-        category: str
-    ) -> str:
+    def _extract_key_sentences(self, text: str) -> str:
         """
-        Fallback local logic for rewriting summary if LLM fails.
+        Extract 1-2 key sentences from the text.
         """
-        # Simple extraction logic as a fallback
-        summary = f"{title}。{text[:100]}"
-        if len(summary) > 280:
-            summary = summary[:277] + "..."
+        # Clean text
+        text = re.sub(r'\s+', ' ', text).strip()
+        # Split into sentences
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        
+        if not sentences:
+            return text
+        
+        # Take the first sentence as it usually contains the main point
+        summary = sentences[0]
+        
+        # If the first sentence is too short, try to add the second one
+        if len(summary) < 100 and len(sentences) > 1:
+            summary += " " + sentences[1]
+            
         return summary
 
     async def summarize_item(
@@ -80,7 +75,7 @@ class ContentSummarizer:
         category: str
     ) -> Dict:
         """
-        Summarize a content item with rewritten summary.
+        Summarize a content item using local logic and translation.
         
         Args:
             item: Content item to summarize.
@@ -91,26 +86,35 @@ class ContentSummarizer:
         """
         try:
             title = item.get("title", "")
-            summary = item.get("summary", "")
+            content = item.get("summary", "") or item.get("text", "")
             
-            if not title or not summary:
+            if not title:
                 return item
             
-            # Rewrite summary using LLM
-            rewritten = await self._rewrite_with_llm(title, summary, category)
+            # 1. Extract key sentences from English content
+            english_summary = self._extract_key_sentences(content if len(content) > 50 else title)
             
-            # Fallback if LLM fails
-            if not rewritten:
-                rewritten = self._rewrite_summary_local(title, summary, category)
+            # 2. Translate title and summary to Traditional Chinese
+            title_zh = await self._translate_text(title)
+            summary_zh = await self._translate_text(english_summary)
             
-            if rewritten:
-                item["summary_rewritten"] = rewritten
-                logger.info(f"✅ Rewritten summary for: {title[:30]}...")
+            # 3. Combine and format
+            # We want: "誰做了什麼 + 影響"
+            # Local logic: use translated title as the main action, and summary as detail
+            rewritten = f"{title_zh}。{summary_zh}"
+            
+            # Clean up: remove extra spaces and ensure it's not too long
+            rewritten = re.sub(r'\s+', ' ', rewritten).strip()
+            if len(rewritten) > 280:
+                rewritten = rewritten[:277] + "..."
+            
+            item["summary_rewritten"] = rewritten
+            logger.info(f"✅ Locally rewritten summary for: {title[:30]}...")
             
             return item
         
         except Exception as e:
-            logger.error(f"Error summarizing item: {str(e)}")
+            logger.error(f"Error in local summarization: {str(e)}")
             return item
     
     async def summarize_items(
@@ -119,34 +123,10 @@ class ContentSummarizer:
         categories: List[str]
     ) -> List[Dict]:
         """
-        Summarize multiple items with their categories.
-        
-        Args:
-            items: List of items to summarize.
-            categories: List of categories corresponding to items.
-        
-        Returns:
-            List[Dict]: List of summarized items.
+        Summarize multiple items.
         """
-        try:
-            tasks = [
-                self.summarize_item(item, cat)
-                for item, cat in zip(items, categories)
-            ]
-            
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            final_items = []
-            for idx, result in enumerate(results):
-                if isinstance(result, Exception):
-                    logger.warning(f"Error summarizing item {idx}: {str(result)}")
-                    final_items.append(items[idx])
-                else:
-                    final_items.append(result)
-            
-            logger.info(f"✅ Summarized {len(final_items)} items")
-            return final_items
-        
-        except Exception as e:
-            logger.error(f"Error in summarize_items: {str(e)}")
-            return items
+        tasks = [
+            self.summarize_item(item, cat)
+            for item, cat in zip(items, categories)
+        ]
+        return await asyncio.gather(*tasks)
