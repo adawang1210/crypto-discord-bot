@@ -89,39 +89,8 @@ class CryptoMorningPulseBot(commands.Cog):
             
             all_items = data.get("items", [])
             
-            # Score items
-            scored_items = []
-            for item in all_items:
-                score = item.get("score_base", 5)
-                
-                # Add keyword bonuses
-                title = item.get("title", "").lower()
-                for keyword_pattern, multiplier in CONTENT_KEYWORD_MULTIPLIERS.items():
-                    if re.search(keyword_pattern, title, re.IGNORECASE):
-                        score += multiplier
-                
-                scored_item = {**item, "score": score}
-                scored_items.append(scored_item)
-            
-            # Sort by score
-            scored_items.sort(key=lambda x: x.get("score", 0), reverse=True)
-            
-            # Deduplicate
-            unique_items = []
-            for item in scored_items:
-                is_duplicate = False
-                for existing in unique_items:
-                    similarity = SequenceMatcher(
-                        None,
-                        item.get("title", ""),
-                        existing.get("title", "")
-                    ).ratio()
-                    if similarity > 0.6:
-                        is_duplicate = True
-                        break
-                
-                if not is_duplicate:
-                    unique_items.append(item)
+            # Score and filter items using ContentScorer
+            unique_items = self.scorer.score_news_items(all_items)
             
             total_items = len(unique_items)
             

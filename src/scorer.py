@@ -35,34 +35,30 @@ class ContentScorer:
         "kol_insights": "KOL Insights",
     }
     
+    # Keywords to exclude (soft news, interviews, irrelevant topics)
+    EXCLUDE_KEYWORDS = [
+        r"interview", r"profile", r"personal story", r"growing up", r"childhood",
+        r"lifestyle", r"opinion piece", r"career", r"entrepreneurship",
+        r"how to", r"guide for", r"beginner", r"podcast", r"video",
+        r"exclusive interview", r"meet the", r"story of"
+    ]
+    
     def __init__(self):
         """Initialize scorer with cache."""
         self.cache_file = os.path.join(CACHE_DIR, "content_cache.json")
         self.published_cache = self._load_cache()
     
     def _load_cache(self) -> Dict:
-        """
-        Load published content cache from file.
-        
-        Returns:
-            Dict: Cache of published content items.
-        """
+        """Load published content cache from file."""
         if os.path.exists(self.cache_file):
             try:
                 with open(self.cache_file, "r", encoding="utf-8") as f:
                     cache = json.load(f)
-                    # Clean up old entries (older than CACHE_RETENTION_DAYS)
-                    cutoff_time = (
-                        datetime.now() - timedelta(days=CACHE_RETENTION_DAYS)
-                    ).isoformat()
-                    cache = {
-                        k: v for k, v in cache.items()
-                        if v.get("timestamp", "") > cutoff_time
-                    }
+                    cutoff_time = (datetime.now() - timedelta(days=CACHE_RETENTION_DAYS)).isoformat()
+                    cache = {k: v for k, v in cache.items() if v.get("timestamp", "") > cutoff_time}
                     return cache
             except Exception as e:
                 logger.error(f"Error loading cache: {str(e)}")
-        
         return {}
     
     def _save_cache(self) -> None:
@@ -73,223 +69,99 @@ class ContentScorer:
         except Exception as e:
             logger.error(f"Error saving cache: {str(e)}")
     
-    def _extract_keywords(self, text: str) -> List[str]:
+    def is_relevant(self, item: Dict) -> bool:
         """
-        Extract keywords from text for deduplication.
-        
-        Args:
-            text: Text to extract keywords from.
-        
-        Returns:
-            List[str]: List of keywords.
+        Check if the item is relevant to crypto market movements.
+        Excludes soft news, interviews, and personal stories.
         """
-        # Remove URLs and special characters
-        text = re.sub(r"http\S+|@\w+|#\w+", "", text)
-        # Extract words (3+ characters)
-        words = re.findall(r"\b\w{3,}\b", text.lower())
-        return words
-    
-    def _calculate_similarity(self, text1: str, text2: str) -> float:
-        """
-        Calculate similarity between two texts using keyword overlap.
+        title = item.get("title", "").lower()
+        summary = (item.get("summary", "") or "").lower()
+        full_text = title + " " + summary
         
-        Args:
-            text1: First text.
-            text2: Second text.
+        # Check for exclude keywords
+        for pattern in self.EXCLUDE_KEYWORDS:
+            if re.search(pattern, full_text):
+                logger.debug(f"Excluding item due to keyword '{pattern}': {title}")
+                return False
         
-        Returns:
-            float: Similarity score (0-1).
-        """
-        keywords1 = set(self._extract_keywords(text1))
-        keywords2 = set(self._extract_keywords(text2))
+        # Must contain at least one crypto-related keyword to be relevant
+        crypto_keywords = [
+            r"btc", r"eth", r"sol", r"crypto", r"blockchain", r"token", r"etf",
+            r"sec", r"fed", r"regulation", r"market", r"price", r"trading",
+            r"defi", r"nft", r"dao", r"layer", r"wallet", r"exchange", r"binance",
+            r"coinbase", r"funding", r"investment", r"hack", r"exploit"
+        ]
         
-        if not keywords1 or not keywords2:
-            return 0.0
-        
-        intersection = len(keywords1 & keywords2)
-        # Use max length for better similarity detection
-        max_len = max(len(keywords1), len(keywords2))
-        
-        return intersection / max_len if max_len > 0 else 0.0
-    
-    def is_duplicate(self, text: str) -> bool:
-        """
-        Check if content is duplicate of recently published item.
-        
-        Args:
-            text: Content text to check.
-        
-        Returns:
-            bool: True if duplicate found, False otherwise.
-        """
-        for cached_item in self.published_cache.values():
-            similarity = self._calculate_similarity(
-                text,
-                cached_item.get("text", "")
-            )
-            if similarity >= DEDUP_KEYWORD_THRESHOLD:
-                logger.debug(f"Duplicate detected with similarity {similarity:.2f}")
-                return True
-        
-        return False
-    
-    def _calculate_kol_score(self, post: Dict) -> int:
-        """
-        Calculate impact score for a KOL post.
-        
-        Args:
-            post: KOL post dictionary.
-        
-        Returns:
-            int: Total impact score.
-        """
-        score = post.get("base_score", 0)
-        text = post.get("text", "").lower()
-        
-        # Apply content keyword multipliers
-        for keywords, multiplier in CONTENT_KEYWORD_MULTIPLIERS.items():
-            if re.search(keywords, text, re.IGNORECASE):
-                score += multiplier
-        
-        # Apply recency bonus
-        timestamp = post.get("timestamp", "")
-        if timestamp:
-            try:
-                # Estimate time from timestamp (simplified)
-                now = datetime.now()
-                # This is a placeholder - actual implementation would parse timestamp
-                score += RECENCY_BONUS.get("2_hours", 15)
-            except Exception as e:
-                logger.debug(f"Error calculating recency bonus: {str(e)}")
-        
-        return score
-    
-    def _calculate_news_quality_score(self, item: Dict) -> int:
-        """
-        Calculate quality score for a news item.
-        
-        Args:
-            item: News item dictionary.
-        
-        Returns:
-            int: Quality score (0-10).
-        """
-        score = 0
-        
-        # Multi-source verification (placeholder - would need actual implementation)
-        score += 2
-        
-        # Financial significance (check for large amounts)
-        text = (item.get("title", "") + item.get("summary", "")).lower()
-        if re.search(r"\$\d{2,}[mb]|billion|million", text, re.IGNORECASE):
-            score += 2
-        
-        # Official sources
-        source = item.get("source", "").lower()
-        official_sources = ["sec", "coinbase", "binance", "ethereum", "bitcoin"]
-        if any(s in source for s in official_sources):
-            score += 3
-        
-        # Network effect (trending indicators)
-        if item.get("kind") == "news":
-            score += 2
-        
-        return min(score, 10)
-    
-    def score_kol_posts(self, posts: List[Dict]) -> List[Dict]:
-        """
-        Score and filter KOL posts.
-        
-        Args:
-            posts: List of KOL posts.
-        
-        Returns:
-            List[Dict]: Scored and filtered posts.
-        """
-        scored_posts = []
-        
-        for post in posts:
-            score = self._calculate_kol_score(post)
+        if not any(re.search(p, full_text) for p in crypto_keywords):
+            logger.debug(f"Excluding item due to lack of crypto keywords: {title}")
+            return False
             
-            if score >= MIN_KOL_SCORE and not self.is_duplicate(post.get("text", "")):
-                post["impact_score"] = score
-                scored_posts.append(post)
-        
-        # Sort by score descending
-        scored_posts.sort(key=lambda x: x.get("impact_score", 0), reverse=True)
-        
-        logger.info(f"Scored {len(scored_posts)} KOL posts (threshold: {MIN_KOL_SCORE})")
-        return scored_posts
-    
+        return True
+
     def score_news_items(self, items: List[Dict]) -> List[Dict]:
-        """
-        Score and filter news items.
-        
-        Args:
-            items: List of news items.
-        
-        Returns:
-            List[Dict]: Scored and filtered items.
-        """
+        """Score and filter news items."""
         scored_items = []
-        
         for item in items:
+            # First check relevance
+            if not self.is_relevant(item):
+                continue
+                
             score = self._calculate_news_quality_score(item)
-            
             if score >= MIN_IMPACT_SCORE and not self.is_duplicate(item.get("title", "")):
                 item["impact_score"] = score
                 scored_items.append(item)
         
-        # Sort by score descending
         scored_items.sort(key=lambda x: x.get("impact_score", 0), reverse=True)
-        
-        logger.info(f"Scored {len(scored_items)} news items (threshold: {MIN_IMPACT_SCORE})")
         return scored_items
-    
+
+    def _calculate_news_quality_score(self, item: Dict) -> int:
+        """Calculate quality score for a news item."""
+        score = 0
+        text = (item.get("title", "") + (item.get("summary", "") or "")).lower()
+        
+        # Financial significance
+        if re.search(r"\$\d{2,}[mb]|billion|million", text):
+            score += 3
+        
+        # Market movement keywords
+        if re.search(r"surge|plummet|crash|rally|breakout|ath|all-time high", text):
+            score += 2
+            
+        # Official/Major sources
+        source = item.get("source", "").lower()
+        if any(s in source for s in ["coindesk", "cointelegraph", "the block", "decrypt", "bloomberg", "reuters"]):
+            score += 2
+            
+        return min(score + 2, 10)
+
     def _categorize_news(self, item: Dict) -> str:
-        """
-        Categorize a news item into one of the predefined categories.
+        """Categorize a news item with stricter rules."""
+        text = (item.get("title", "") + (item.get("summary", "") or "")).lower()
         
-        Args:
-            item: News item to categorize.
-        
-        Returns:
-            str: Category name.
-        """
-        text = (item.get("title", "") + item.get("summary", "")).lower()
-        
-        # Simple keyword-based categorization
-        if re.search(r"sec|regulation|law|policy|etf|fed|central bank|government", text):
-            return "macro_policy"
-        elif re.search(r"inflow|outflow|whale|transfer|drain|hack|exploit|funding|raised|investment", text):
+        # Stricter Capital Flow: must involve actual money movement or funding
+        if re.search(r"inflow|outflow|whale|transfer|drain|hack|exploit|funding|raised|investment|venture|capital|seed round", text):
             return "capital_flow"
-        elif re.search(r"\bbitcoin\b|\bbtc\b|\bethereum\b|\beth\b|\bsolana\b|\bsol\b", text):
+        
+        # Macro/Policy: regulation, law, central banks
+        if re.search(r"sec|regulation|law|policy|etf|fed|central bank|government|court|lawsuit|legal", text):
+            return "macro_policy"
+            
+        # Major Coins: BTC, ETH, SOL
+        if re.search(r"\bbitcoin\b|\bbtc\b|\bethereum\b|\beth\b|\bsolana\b|\bsol\b", text):
             return "major_coins"
-        elif re.search(r"altcoin|token|memecoin|trending|surge|pump|listing|brevis|brev", text):
+            
+        # Altcoins/Trending: specific tokens or trending topics
+        if re.search(r"altcoin|token|memecoin|trending|surge|pump|listing", text):
             return "altcoins_trending"
-        elif re.search(r"layer|l2|defi|rwa|ai|zk|protocol|infrastructure|mainnet|testnet", text):
+            
+        # Tech/Narratives: infrastructure, protocols
+        if re.search(r"layer|l2|defi|rwa|ai|zk|protocol|infrastructure|mainnet|testnet|upgrade", text):
             return "tech_narratives"
-        else:
-            return "macro_policy"  # Default category
-    
-    def select_top_items_with_diversity(
-        self,
-        kol_posts: List[Dict],
-        news_items: List[Dict],
-        total_items: int = 5
-    ) -> List[Dict]:
-        """
-        Select top items ensuring category diversity.
-        Prioritize: 1 KOL Insights + 4 diverse news categories.
-        
-        Args:
-            kol_posts: Scored KOL posts.
-            news_items: Scored news items.
-            total_items: Total items to select (default 5).
-        
-        Returns:
-            List[Dict]: Selected items with category diversity.
-        """
+            
+        return "macro_policy"
+
+    def select_top_items_with_diversity(self, kol_posts: List[Dict], news_items: List[Dict], total_items: int = 5) -> List[Dict]:
+        """Select top items ensuring category diversity and relevance."""
         selected = []
         category_count = {cat: 0 for cat in self.VALID_CATEGORIES.keys()}
         
@@ -298,26 +170,24 @@ class ContentScorer:
             kol_item = kol_posts[0]
             kol_item["category"] = "kol_insights"
             kol_item["source_name"] = kol_item.get("username", "Unknown")
-            # Ensure KOL posts have a summary field for the summarizer
             if "summary" not in kol_item and "text" in kol_item:
                 kol_item["summary"] = kol_item["text"]
             selected.append(kol_item)
             category_count["kol_insights"] = 1
         
-        # Step 2: Categorize and sort news items
+        # Step 2: Categorize news items
         categorized_news = {cat: [] for cat in self.VALID_CATEGORIES.keys() if cat != "kol_insights"}
         for item in news_items:
             category = self._categorize_news(item)
             if category in categorized_news:
                 categorized_news[category].append(item)
         
-        # Step 3: Select items ensuring category diversity
-        # First pass: take 1 item from each news category that hasn't been filled
+        # Step 3: Select items ensuring diversity
         news_categories = [cat for cat in self.VALID_CATEGORIES.keys() if cat != "kol_insights"]
+        
+        # Pass 1: 1 from each category
         for category in news_categories:
-            if len(selected) >= total_items:
-                break
-            
+            if len(selected) >= total_items: break
             if category_count[category] < 1 and categorized_news[category]:
                 item = categorized_news[category].pop(0)
                 item["category"] = category
@@ -325,40 +195,36 @@ class ContentScorer:
                 selected.append(item)
                 category_count[category] = 1
         
-        # Second pass: fill remaining slots with highest scoring items from any category
-        # But still respect the "avoid same category more than 2 times" rule
-        all_remaining_news = []
+        # Pass 2: Fill remaining
+        all_remaining = []
         for cat, items in categorized_news.items():
             for item in items:
                 item["category"] = cat
-                all_remaining_news.append(item)
+                all_remaining.append(item)
+        all_remaining.sort(key=lambda x: x.get("impact_score", 0), reverse=True)
         
-        # Sort all remaining news by impact score
-        all_remaining_news.sort(key=lambda x: x.get("impact_score", 0), reverse=True)
-        
-        for item in all_remaining_news:
-            if len(selected) >= total_items:
-                break
-            
+        for item in all_remaining:
+            if len(selected) >= total_items: break
             category = item["category"]
             if category_count[category] < 2:
                 item["source_name"] = item.get("source", "Unknown")
                 selected.append(item)
                 category_count[category] += 1
-        
-        logger.info(f"✅ Selected {len(selected)} items with category diversity: {category_count}")
+                
         return selected[:total_items]
-    
+
+    def is_duplicate(self, text: str) -> bool:
+        """Check if content is duplicate."""
+        for cached_item in self.published_cache.values():
+            similarity = SequenceMatcher(None, text.lower(), cached_item.get("text", "").lower()).ratio()
+            if similarity >= 0.7: return True
+        return False
+
     def add_to_cache(self, item: Dict) -> None:
-        """
-        Add published item to cache.
-        
-        Args:
-            item: Item to add to cache.
-        """
+        """Add published item to cache."""
         cache_key = f"{item.get('category', 'unknown')}_{datetime.now().isoformat()}"
         self.published_cache[cache_key] = {
-            "text": item.get("text", item.get("title", "")),
+            "text": item.get("title", ""),
             "timestamp": datetime.now().isoformat(),
             "category": item.get("category", ""),
         }
