@@ -53,7 +53,7 @@ class CryptoBot(commands.Bot):
             # 2. Score and select news
             logger.info(">>> [STEP 3] Scoring and selecting news...")
             scorer = ContentScorer()
-            # Fix: Pass arguments as positional to match ContentScorer.score_news_items(self, news_list, total_items=5)
+            # Call with positional arguments: (items, total_items)
             selected_news = scorer.score_news_items(
                 data.get("news_items", []),
                 8

@@ -36,7 +36,6 @@ class ContentScorer:
     }
     
     # Keywords to exclude (soft news, interviews, irrelevant topics)
-    # Made more specific to avoid over-filtering
     EXCLUDE_KEYWORDS = [
         r"exclusive interview", r"personal story", r"growing up", r"childhood",
         r"lifestyle", r"career", r"how to", r"guide for", r"beginner",
@@ -70,20 +69,16 @@ class ContentScorer:
             logger.error(f"Error saving cache: {str(e)}")
     
     def is_relevant(self, item: Dict) -> bool:
-        """
-        Check if the item is relevant to crypto market movements.
-        """
+        """Check if the item is relevant to crypto market movements."""
         title = item.get("title", "").lower()
         summary = (item.get("summary", "") or "").lower()
         full_text = title + " " + summary
         
-        # 1. Check for exclude keywords (stricter matching)
         for pattern in self.EXCLUDE_KEYWORDS:
             if re.search(pattern, full_text):
                 logger.info(f"🚫 Excluding (Soft News): {title[:50]}... (Reason: {pattern})")
                 return False
         
-        # 2. Broad crypto keywords to ensure it's about the industry
         crypto_keywords = [
             r"btc", r"eth", r"sol", r"xrp", r"ripple", r"zcash", r"zec", r"ada", r"dot", r"avax",
             r"crypto", r"blockchain", r"token", r"etf", r"ipo", r"sec", r"fed", r"regulation",
@@ -100,43 +95,37 @@ class ContentScorer:
             
         logger.info(f"🚫 Excluding (Irrelevant): {title[:50]}...")
         return False
-
-    def score_news_items(self, items: List[Dict]) -> List[Dict]:
-        """Score and filter news items."""
+    
+    def score_news_items(self, items: List[Dict], total_items: int = 8) -> List[Dict]:
+        """Score and filter news items, then select top items with diversity."""
         scored_items = []
         for item in items:
             if not self.is_relevant(item):
                 continue
                 
             score = self._calculate_news_quality_score(item)
-            # Ensure we have enough content by accepting items with a reasonable score
             if score >= 2 and not self.is_duplicate(item.get("title", "")):
                 item["impact_score"] = score
                 scored_items.append(item)
         
         scored_items.sort(key=lambda x: x.get("impact_score", 0), reverse=True)
         logger.info(f"✅ Filtered and scored {len(scored_items)} relevant news items")
-        return scored_items
+        
+        # Use diversity selection logic
+        return self.select_top_items_with_diversity([], scored_items, total_items)
 
     def _calculate_news_quality_score(self, item: Dict) -> int:
         """Calculate quality score for a news item."""
         score = 2.0 # Base score
         text = (item.get("title", "") + (item.get("summary", "") or "")).lower()
         
-        # 1. Financial significance
         if re.search(r"\$\d{2,}[mb]|billion|million", text):
             score += 3.0
-        
-        # 2. Market movement keywords
         if re.search(r"surge|plummet|crash|rally|breakout|ath|all-time high", text):
             score += 2.0
-            
-        # 3. Keyword multipliers from config
         for keyword, multiplier in CONTENT_KEYWORD_MULTIPLIERS.items():
             if re.search(rf"\b{keyword}\b", text):
                 score *= multiplier
-            
-        # 4. Source reliability
         source = item.get("source", "").lower()
         if any(s in source for s in ["coindesk", "cointelegraph", "the block", "decrypt", "bloomberg", "reuters"]):
             score += 2.0
@@ -146,7 +135,6 @@ class ContentScorer:
     def _categorize_news(self, item: Dict) -> str:
         """Categorize a news item."""
         text = (item.get("title", "") + (item.get("summary", "") or "")).lower()
-        
         if re.search(r"inflow|outflow|whale|transfer|drain|hack|exploit|funding|raised|investment|venture|capital|seed round", text):
             return "capital_flow"
         if re.search(r"sec|regulation|law|policy|etf|fed|central bank|government|court|lawsuit|legal", text):
@@ -157,7 +145,6 @@ class ContentScorer:
             return "altcoins_trending"
         if re.search(r"layer|l2|defi|rwa|ai|zk|protocol|infrastructure|mainnet|testnet|upgrade", text):
             return "tech_narratives"
-            
         return "macro_policy"
 
     def select_top_items_with_diversity(self, kol_posts: List[Dict], news_items: List[Dict], total_items: int = 5) -> List[Dict]:
