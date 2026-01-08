@@ -49,22 +49,25 @@ class DiscordFormatter:
         
         # Add items as fields
         for idx, item in enumerate(items, 1):
-            category = item.get("category", "macro_policy")
+            # Determine category based on item type
+            item_type = item.get("type", "news")
+            if item_type == "trending":
+                category = "trending"
+            else:
+                category = item.get("category", "macro_policy")
+            
             emoji = CATEGORY_EMOJIS.get(category, "📰")
             category_name = DiscordFormatter._format_category_name(category)
             
             # Prepare summary text
-            if "text" in item:  # KOL post
-                summary = item.get("text", "")[:280]
-            else:  # News item
-                summary = item.get("title", "")[:280]
+            summary = item.get("title", item.get("text", ""))[:280]
             
-            # Get impact score
-            impact_score = item.get("impact_score", 0)
+            # Get impact score (use item score or calculate from base)
+            impact_score = int(item.get("score", item.get("score_base", 5)))
             
-            # Get source link
+            # Get source link and name
             source_url = item.get("url", "")
-            source_name = item.get("source_name", "Unknown")
+            source_name = item.get("source", "Unknown")
             
             # Format field value with impact score and source
             if source_url:
